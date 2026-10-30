@@ -119,17 +119,24 @@ def prism_y(profile, y0, y1):
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     return bm
 
-def passage(points):
-    """Closed arched passage through (x, y, floor z) points, its sides square to the first leg."""
+def passage(points, step=3.5):
+    """Closed arched passage through (x, y, floor z, half width, height) points, its sides square to
+    the whole run. Rings every few metres give the baked light enough vertices to land on."""
     a, b = Vector(points[0][:2]), Vector(points[-1][:2])
     side = Vector((-(b - a).y, (b - a).x)).normalized()
-    w, h = D["passage_half_w"], D["passage_h"]
-    spring = h - w * 0.55
-    profile = [(-w, 0), (w, 0)] + [(w * math.cos(math.pi * k / 16), spring + w * 0.55 * math.sin(math.pi * k / 16)) for k in range(17)]
+    fine = []
+    for p0, p1 in zip(points, points[1:]):
+        n = max(1, int((Vector(p1[:3]) - Vector(p0[:3])).length / step))
+        fine += [tuple(u + (v - u) * k / n for u, v in zip(p0, p1)) for k in range(n)]
+    fine.append(points[-1])
     bm = bmesh.new()
-    rings = [[bm.verts.new((x + side.x * u, y + side.y * u, z + v)) for u, v in profile] for x, y, z in points]
+    rings = []
+    for x, y, z, w, h in fine:
+        spring = h - w * 0.55
+        profile = [(-w, 0), (w, 0)] + [(w * math.cos(math.pi * k / 16), spring + w * 0.55 * math.sin(math.pi * k / 16)) for k in range(17)]
+        rings.append([bm.verts.new((x + side.x * u, y + side.y * u, z + v)) for u, v in profile])
     bm.faces.new(rings[0]); bm.faces.new(list(reversed(rings[-1])))
-    n = len(profile)
+    n = len(rings[0])
     for r0, r1 in zip(rings, rings[1:]):
         for i in range(n):
             j = (i + 1) % n
@@ -138,17 +145,35 @@ def passage(points):
     return bm
 
 def passages():
-    """Two doors in the terrace wall, either side of the main stair, meeting under the sphere,
-    then Boullée's ramp up through the floor to the sarcophagus. The section's slope is about 23°."""
-    z = D["passage_z"]
+    """The front arch and two doors in the terrace wall beside the main stair, all meeting under the
+    sphere, then Boullée's ramp up through the floor to the sarcophagus. The section's slope is about 23°."""
+    z, w, h = D["passage_z"], D["passage_half_w"], D["passage_h"]
+    tw, top = D["tunnel_half_w"], D["tunnel_spring"] + D["tunnel_half_w"] - D["platform_top"]
     door_x, door_y = 30.0, -math.sqrt(D["platform_R"] ** 2 - 30.0 ** 2)
     end = (0.0, -34.0)
     legs = []
     for s in (-1, 1):
         run = Vector((end[0] - s * door_x, end[1] - door_y)).normalized()
-        legs.append([(s * door_x - run.x * 3, door_y - run.y * 3, z), (end[0] + run.x * 2, end[1] + run.y * 2, z)])
-    legs.append([(0, -38.0, z), (0, -26.0, z), (0, -5.0, D["floor_top"])])
+        legs.append([(s * door_x - run.x * 3, door_y - run.y * 3, z, w, h), (end[0] + run.x * 2, end[1] + run.y * 2, z, w, h)])
+    # the roof stays at the arch's height until the passage is inside the sphere's face
+    legs.append([(0, -52.0, D["platform_top"] + 0.02, tw, top), (0, -46.0, D["platform_top"] - 0.02, tw, top),
+                 (0, -31.0, 1.2, tw, top + D["platform_top"] - 1.2 - 0.2), (0, -27.0, z, w, h), (0, -26.2, z, w, h)])
+    legs.append([(0, -38.0, z, w, h), (0, -26.0, z, w, h), (0, -5.0, D["floor_top"], w, h)])
     return legs
+
+def passage_lamps():
+    """Oil lamps on the passage walls, every 12 units, alternating sides."""
+    lamps = []
+    for leg in passages():
+        a, b = Vector(leg[0][:3]), Vector(leg[-1][:3])
+        run = (b - a); n = int(run.length / 12)
+        side = Vector((-run.y, run.x, 0)).normalized()
+        for k in range(1, n):
+            p = a + run * (k / n)
+            if p.length > 158:
+                continue
+            lamps.append(tuple(p + side * (1.85 if k % 2 else -1.85) + Vector((0, 0, 2.5))))
+    return lamps
 
 def star_holes():
     """The vault's openings as (direction, inner radius). Only where the shell stands clear of the
@@ -621,17 +646,13 @@ def build():
     inner = temp_obj("cut_inner", uv_sphere(D["shell_inner_R"], CZ, 256, 128))
     inner.data.materials.append(M["stars"])     # boolean carries the cutter's material
     boolean(sphere, inner); kill(inner)
-    # the arch at the sphere's foot, as drawn in the elevation: a sealed door
-    tw, ts = D["tunnel_half_w"], D["tunnel_spring"]
-    arch = [(-tw, D["platform_top"]), (tw, D["platform_top"])] + \
-           [(tw * math.cos(math.pi * k / 32), ts + tw * math.sin(math.pi * k / 32)) for k in range(33)]
-    tun = temp_obj("cut_tunnel", prism_y(arch, -75, -31))
-    boolean(sphere, tun); kill(tun)
-    mesh_obj("Sealed door", box(-tw, tw, -31.3, -31.0, D["platform_top"], ts + tw), C_MON, M["dark"])
-    for c_ in cutters:
-        boolean(sphere, c_)
+    # holes first, on the clean shell: the fast solver silently refuses a mesh that isn't watertight
+    solid_faces = len(sphere.data.polygons)
     holes_cut = temp_obj("cut_holes", hole_cutter())
     boolean(sphere, holes_cut, solver="MANIFOLD"); kill(holes_cut)
+    assert len(sphere.data.polygons) > solid_faces + 10000, "the vault's holes were not cut"
+    for c_ in cutters:
+        boolean(sphere, c_, solver="MANIFOLD")
     bore = M["sphere"].copy(); bore.name = "Bore"
     sphere.data.materials.append(M["stars"])
     sphere.data.materials.append(bore)

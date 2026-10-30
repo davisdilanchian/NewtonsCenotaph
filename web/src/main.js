@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { loadWorld, groundHeight, CENTER } from './world.js';
+import { loadWorld, groundHeight, CENTER, SUN } from './world.js';
+import { makeSunshafts } from './sunshafts.js';
 import { Player, RADIUS, WALK, RUN } from './player.js';
 import { clamp, lerp, SCALE } from './util.js';
 
@@ -12,28 +13,30 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'hi
 renderer.setPixelRatio(Math.min(devicePixelRatio, touch ? 1.5 : 1.75));
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.84;
+renderer.toneMappingExposure = 0.72;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.shadowMap.autoUpdate = false;
 document.body.prepend(renderer.domElement);
 const canvas = renderer.domElement;
 
-const FOV = 55;                                 // near natural vision; wider shrinks the sphere
+let FOV = 55;                                   // vertical; [ and ] change it
+try { FOV = clamp(+localStorage.getItem('fov') || FOV, 35, 100); } catch { /* storage can be blocked */ }
 const camera = new THREE.PerspectiveCamera(FOV, innerWidth / innerHeight, 0.07, 24000);
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
 
-const fogDay = new THREE.Color(0xd3dbe3), fogVoid = new THREE.Color(0x151b25), FOG = 0.00045 * Math.sqrt(SCALE);
+const fogDay = new THREE.Color(0xd3dbe3), fogVoid = new THREE.Color(0x05070a), FOG = 0.00045 * Math.sqrt(SCALE);
+const DAY = 360;                                // seconds for the sun to cross the sky
 const metres = (v) => `${Math.round(v * SCALE)} m`;
 
 // Places, as feet position and what you face on arrival.
 const PLACES = [
   { name: 'The approach', note: `Reflecting basin, ${metres(730)} out`, at: [0, 0, 731], look: [0, 60, 0] },
   { name: 'The main stair', note: `${metres(42)} wide`, at: [0, 0, 172], look: [0, 40, 0] },
-  { name: 'The tunnel', note: `${metres(160)} under the terrace to the sphere`, at: [26.9, 0.06, 142], look: [0, 2, 34] },
+  { name: 'The tunnel', note: 'Down through the arch, under the sphere', at: [0, 5.5, 60], look: [0, 3, 30] },
   { name: 'Inside the sphere', note: 'Newton’s sarcophagus under the pierced vault', at: [5, 9.5, 5], look: [0, 12, -3] },
   { name: 'The bridge', note: `${metres(46.5)} up, before the front stair block`, at: [-20, 46.5, 104], look: [0, 50, 0] },
   { name: 'The drum terrace', note: 'Four rows of cypress', at: [-66, 46.5, 64], look: [-94, 47, 0] },
@@ -76,11 +79,11 @@ function showSheets() {
     sheetTimer = setInterval(() => pick((current + 1) % SHEETS.length), 6000);
 }
 
-let world, player;
+let world, player, shafts, dayClock = 0.3, shadowClock = 0;
 const keys = new Set();
 const input = { x: 0, y: 0, run: false, jump: false };
 const touchMove = { x: 0, y: 0 };
-const EYE = 1.63 / SCALE;
+const EYE = 1.63 / SCALE, EYE_VOID = 26, EYE_PASSAGE = 8;   // exposure once the eye has adapted
 let inside = 0, tunnel = 0, time = 0, stride = 0, bob = 0, lodAt = new THREE.Vector2(1e9, 1e9), lodClock = 0, started = false;
 
 
@@ -172,20 +175,25 @@ function tick(dt) {
   const below = underground(), isIn = below || p.distanceTo(CENTER) < 67;
   inside = lerp(inside, isIn ? 1 : 0, Math.min(1, dt * 1.6));
   tunnel = lerp(tunnel, below ? 1 : 0, Math.min(1, dt * 2.5));
-  world.scene.environmentIntensity = lerp(0.2, 0.02, inside);
-  world.inner.intensity = 0.2 * inside * (1 - tunnel);
-  renderer.toneMappingExposure = lerp(0.84, 1.25, inside);
-  world.bounce.intensity = lerp(0.3, 0.42 * (1 - tunnel) + 0.012 * tunnel, inside);
-  world.lantern.intensity = 2.6 * tunnel;
-  world.lantern.position.copy(camera.position);
-  world.scene.fog.density = lerp(FOG, 0.0026, inside * (1 - tunnel));          // the air in the void gives it depth
+  // the sun crosses the sky and back; holding T hurries it along
+  dayClock += dt * (keys.has('KeyT') ? 40 : 1) / DAY;
+  const leg = dayClock % 2;
+  world.setSun(leg < 1 ? leg : 2 - leg);
+
+  // nothing lights the dark but the sun and the sky: the eye adapts, as it would
+  world.scene.environmentIntensity = lerp(0.42, 0, inside);
+  renderer.toneMappingExposure = lerp(0.72, lerp(EYE_VOID, EYE_PASSAGE, tunnel), inside);
+  world.scene.fog.density = lerp(FOG, 0.0006, inside);
   world.scene.fog.color.lerpColors(fogDay, fogVoid, inside);
-  world.stars.visible = camera.position.distanceTo(CENTER) < 125;
-  world.stars.userData.scale.value = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+  world.shadowsClose(inside > 0.4);
+  shadowClock -= dt;
+  if (shadowClock <= 0 || keys.has('KeyT')) { shadowClock = inside > 0.4 ? 0.2 : 1.5; world.refresh(); }
 
   world.water.material.uniforms.time.value = time;
+  world.lamps.material.uniforms.t.value = time;
+  world.lamps.material.uniforms.scale.value = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
   world.sky.material.uniforms.time.value = time * 4;
-  world.fire.update(dt, time);
+  world.fire.update(dt, time, camera);
 
   lodClock += dt;
   if (lodClock > 0.25 && lodAt.distanceTo({ x: p.x, y: p.z }) > 6) {
@@ -195,6 +203,7 @@ function tick(dt) {
   const label = placeLabel(player.feet);
   if ($('whereName').textContent !== label.name) show(label);
   renderer.render(world.scene, camera);
+  if (inside > 0.02 && camera.position.distanceTo(CENTER) < 72) shafts.render(camera);
   adapt(dt);
 }
 
@@ -204,6 +213,11 @@ function bindControls() {
     keys.add(e.code);
     if (e.code === 'Space') { input.jump = true; e.preventDefault(); }
     if (e.code === 'KeyR') teleport(0);
+    if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
+      FOV = clamp(FOV + (e.code === 'BracketRight' ? 5 : -5), 35, 100);
+      $('whereNote').textContent = `Field of view ${FOV}°`;
+      try { localStorage.setItem('fov', FOV); } catch { /* storage can be blocked */ }
+    }
     const n = +e.key;
     if (n >= 1 && n <= PLACES.length) teleport(n - 1);
     if (e.code.startsWith('Key') || e.code.startsWith('Arrow')) $('keys').classList.add('faded');
@@ -254,12 +268,13 @@ function bindControls() {
 async function start() {
   world = await loadWorld(renderer, (f) => { $('bar').firstElementChild.style.width = `${Math.round(f * 100)}%`; });
   player = new Player({ bvh: world.bvh, groundHeight, treeHash: world.trees.hash });
+  shafts = makeSunshafts(renderer, world.sun, SUN);
   bindControls();
 
-  $('about').textContent = `Étienne-Louis Boullée drew this sphere for Isaac Newton in 1784. It was never built. Published accounts make it 150 m across; here it stands ${metres(150)} wide, with every terrace and all 2,139 cypresses from his drawings.`;
+  $('about').textContent = `Published accounts put the sphere at 150 m. This reconstruction, judged by eye from the people and cypresses in his drawings, stands it ${metres(150)} wide, with all 2,139 cypresses.`;
   arrive(PLACES[0]);
   world.trees.updateLOD(1e6, 1e6, 75);          // every tree in the shadow map
-  world.fire.update(0.016, 0);
+  world.fire.update(0.016, 0, camera);
   renderer.shadowMap.needsUpdate = true;
   renderer.compile(world.scene, camera);
   updateCamera(0.016);

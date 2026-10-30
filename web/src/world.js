@@ -11,10 +11,12 @@ import { noise3, rng, smooth, SCALE } from './util.js';
 import { figureGeometries } from './character.js';
 
 export const CENTER = new THREE.Vector3(0, 73.5, 0);        // sphere centre
-export const SUN = new THREE.Vector3().setFromSphericalCoords(1, Math.PI / 2 - THREE.MathUtils.degToRad(28), 0);
-{ // low and from the left, so half the sphere falls into shadow as in Boullée's sheets
-  const a = THREE.MathUtils.degToRad(-172), e = THREE.MathUtils.degToRad(22);
-  SUN.set(Math.cos(e) * Math.cos(a), Math.sin(e), -Math.cos(e) * Math.sin(a));
+export const SUN = new THREE.Vector3();
+
+/** Sun across the day, u from 0 to 1: rising on the left, over the front, setting on the right. */
+export function placeSun(u) {
+  const a = THREE.MathUtils.degToRad(-176 + 168 * u), e = THREE.MathUtils.degToRad(12 + 56 * Math.sin(Math.PI * u));
+  return SUN.set(Math.cos(e) * Math.cos(a), Math.sin(e), -Math.cos(e) * Math.sin(a));
 }
 
 // matches the hills in scripts/build_scene.py
@@ -36,13 +38,21 @@ function load(name, srgb, renderer, manager) {
   return t;
 }
 
+const SKY_LEVEL = { value: 1 };                 // follows the height of the sun
+
 /** Weather that repeats nowhere: broad tonal drift, rain streaks, and the sphere's stone courses. */
 function weathered(mat, { streaks = 1, courses = false } = {}) {
   mat.onBeforeCompile = (s) => {
-    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWP;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWP = (modelMatrix * vec4(position, 1.0)).xyz;');
-    s.fragmentShader = s.fragmentShader.replace('#include <common>', `#include <common>
-      varying vec3 vWP;
+    s.uniforms.skyLevel = SKY_LEVEL;
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWP, vBaked; attribute vec3 baked;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWP = (modelMatrix * vec4(position, 1.0)).xyz; vBaked = baked;');
+    s.fragmentShader = s.fragmentShader.replace('#include <lights_fragment_maps>', `#include <lights_fragment_maps>
+      #ifdef USE_ENVMAP
+        iblIrradiance = vec3(0.0);                    // diffuse sky comes from the path traced bake instead
+      #endif
+      irradiance += vBaked * skyLevel;`)
+      .replace('#include <common>', `#include <common>
+      varying vec3 vWP, vBaked; uniform float skyLevel;
       float vh(vec3 p) { p = fract(p * 0.3183 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
       float vn(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         return mix(mix(mix(vh(i), vh(i + vec3(1, 0, 0)), f.x), mix(vh(i + vec3(0, 1, 0)), vh(i + vec3(1, 1, 0)), f.x), f.y),
@@ -50,8 +60,8 @@ function weathered(mat, { streaks = 1, courses = false } = {}) {
       float fb(vec3 p) { return 0.55 * vn(p) + 0.3 * vn(p * 2.1 + 3.1) + 0.15 * vn(p * 4.3 + 7.7); }`)
       .replace('#include <map_fragment>', `#include <map_fragment>
       diffuseColor.rgb *= 0.8 + 0.3 * fb(vWP * 0.016) + 0.1 * fb(vWP * 0.13);
-      float lng = atan(vWP.z, vWP.x);
-      diffuseColor.rgb *= 1.0 - ${streaks.toFixed(1)} * 0.2 * smoothstep(0.52, 0.8, fb(vec3(lng * 46.0, vWP.y * 0.016, 2.0)));
+      float lng = atan(vWP.z, vWP.x), upright = 1.0 - abs(normalize(cross(dFdx(vWP), dFdy(vWP))).y);
+      diffuseColor.rgb *= 1.0 - ${streaks.toFixed(1)} * 0.2 * upright * upright * smoothstep(0.52, 0.8, fb(vec3(lng * 46.0, vWP.y * 0.016, 2.0)));
       ${courses ? `vec3 sd = normalize(vWP - vec3(0.0, 73.5, 0.0));
       float lat = asin(sd.y) * 75.0, H = ${(1.5 / SCALE).toFixed(3)}, row = floor(lat / H);
       float along = lng * 75.0 * cos(asin(sd.y)) / (H * 2.4) + 0.5 * mod(row, 2.0);
@@ -97,88 +107,41 @@ function stoneUVs(source, tile, sphere) {
   return g;
 }
 
-/** Bore walls catch the sky, so a hole stays a point of daylight from anywhere on the floor. */
-function boreMaterial() {
-  return new THREE.ShaderMaterial({
-    vertexShader: `varying float vR; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vR = distance(w.xyz, vec3(0.0, 73.5, 0.0)); gl_Position = projectionMatrix * viewMatrix * w; }`,
-    fragmentShader: `varying float vR; void main(){ float t = smoothstep(66.5, 74.0, vR);
-      vec3 c = mix(vec3(0.1, 0.13, 0.2), vec3(1.5, 1.7, 2.0), t * t);
-      if (distance(cameraPosition, vec3(0.0, 73.5, 0.0)) > 72.0) c = vec3(0.03, 0.027, 0.025);
-      gl_FragColor = vec4(c, 1.0);
-      #include <tonemapping_fragment>
-      #include <colorspace_fragment>
-    }`,
-  });
-}
-
 /**
- * Daylight inside the sphere. The openings are real holes in the shell, so the sky needs no help;
- * this adds what the air does with the sun: shafts crossing the void and the pools where they land.
+ * Daylight reaching the inside of the sphere: each bore is a small patch of sky, summed over every
+ * vertex with the form factor between them. Inside a closed sphere every patch then sees every
+ * other equally, so interreflection adds the same amount everywhere: mean * albedo / (1 - albedo).
  */
-function vaultLight(buffer) {
-  const group = new THREE.Group(), R = 66.9;
-  const n = new Uint32Array(buffer, 0, 1)[0], data = new Float32Array(buffer, 4, n * 4);
-  const scale = { value: 800 }, d = new THREE.Vector3(), from = [], to = [], width = [], spot = [], spotSize = [], glint = [], glintSize = [];
-  for (let i = 0; i < n; i++) {
-    d.fromArray(data, i * 4);
-    const r = data[i * 4 + 3], toSun = d.dot(SUN);
-    glint.push(d.x * R + CENTER.x, d.y * R + CENTER.y, d.z * R + CENTER.z); glintSize.push(r * 2);
-    if (toSun < 0.9) continue;
-    const a = d.clone().multiplyScalar(R).add(CENTER), b = d.clone().addScaledVector(SUN, -2 * toSun).multiplyScalar(R).add(CENTER);
-    from.push(a.x, a.y, a.z); to.push(b.x, b.y, b.z); width.push(r * 1.7);
-    spot.push(b.x, b.y, b.z); spotSize.push(r * 2.2);
+function skyThroughHoles(buffer, geometries) {
+  const count = new Uint32Array(buffer, 0, 1)[0], data = new Float32Array(buffer, 4, count * 4), STRIDE = 3;
+  const hx = [], hy = [], hz = [], dx = [], dy = [], dz = [], area = [];
+  for (let i = 0; i < count; i += STRIDE) {
+    const o = i * 4, x = data[o], y = data[o + 1], z = data[o + 2], r = data[o + 3];
+    dx.push(x); dy.push(y); dz.push(z);
+    hx.push(x * 67 + CENTER.x); hy.push(y * 67 + CENTER.y); hz.push(z * 67 + CENTER.z);
+    area.push(Math.PI * (0.9 * r) ** 2 * STRIDE);
   }
-
-  const shafts = new THREE.InstancedBufferGeometry();
-  shafts.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, 0, 0, 0.5, 0, 0, -0.5, 1, 0, 0.5, 1, 0], 3));
-  shafts.setIndex([0, 1, 3, 0, 3, 2]);
-  shafts.setAttribute('from', new THREE.InstancedBufferAttribute(new Float32Array(from), 3));
-  shafts.setAttribute('to', new THREE.InstancedBufferAttribute(new Float32Array(to), 3));
-  shafts.setAttribute('width', new THREE.InstancedBufferAttribute(new Float32Array(width), 1));
-  shafts.instanceCount = width.length;
-  const beams = new THREE.Mesh(shafts, new THREE.ShaderMaterial({
-    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    vertexShader: `attribute vec3 from, to; attribute float width; varying vec2 vP;
-      void main(){ vec3 p = mix(from, to, position.y), axis = normalize(to - from), side = normalize(cross(axis, cameraPosition - p));
-        vP = vec2(position.x * 2.0, position.y); gl_Position = projectionMatrix * viewMatrix * vec4(p + side * position.x * width, 1.0); }`,
-    fragmentShader: `varying vec2 vP; void main(){ float e = 1.0 - vP.x * vP.x;
-      gl_FragColor = vec4(vec3(1.0, 0.86, 0.66) * e * e * (0.075 - 0.04 * vP.y), 1.0); }`,
-  }));
-  beams.frustumCulled = false;
-
-  // sprites stand flat while the wall curves behind them, so their depth is pulled off the wall
-  const points = (positions, sizes, glsl, grow = '1.0') => {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    g.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
-    const pts = new THREE.Points(g, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { scale },
-      vertexShader: `attribute float size; uniform float scale;
-        void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = max(1.5, size * scale / -mv.z) * ${grow};
-          gl_Position = projectionMatrix * mv;
-          vec4 lifted = projectionMatrix * (mv + vec4(0.0, 0.0, 1.8, 0.0)); gl_Position.z = lifted.z / lifted.w * gl_Position.w; }`,
-      fragmentShader: glsl }));
-    pts.frustumCulled = false;
-    return pts;
-  };
-  group.add(beams,
-    points(spot, spotSize, `void main(){ float d = length(gl_PointCoord - 0.5) * 2.0;
-      gl_FragColor = vec4(vec3(1.0, 0.8, 0.55) * smoothstep(1.0, 0.5, d) * 0.2, 1.0); }`),
-    points(glint, glintSize, `void main(){ float d = length(gl_PointCoord - 0.5) * 2.0;
-      gl_FragColor = vec4(vec3(0.55, 0.72, 1.0) * exp(-d * d * 6.0) * 0.13, 1.0); }`, '2.4'));
-  // the luminous mist round the sarcophagus in Boullée's section
-  const c = document.createElement('canvas'); c.width = c.height = 128;
-  const x = c.getContext('2d'), g = x.createRadialGradient(64, 64, 2, 64, 64, 64);
-  g.addColorStop(0, 'rgba(255,255,255,.5)'); g.addColorStop(0.5, 'rgba(255,255,255,.14)'); g.addColorStop(1, 'rgba(255,255,255,0)');
-  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
-  const map = new THREE.CanvasTexture(c), r = rng(9);
-  for (let i = 0; i < 22; i++) {
-    const m = new THREE.Sprite(new THREE.SpriteMaterial({ map, color: 0x9fb0c4, transparent: true, depthWrite: false, opacity: 0.05 + r() * 0.05, blending: THREE.AdditiveBlending, fog: false }));
-    const a = r() * Math.PI * 2, far = 8 + r() * 30, size = 30 + r() * 42;
-    m.position.set(Math.cos(a) * far, 11 + r() * 5, Math.sin(a) * far); m.scale.set(size * 1.5, size * 0.32, 1);
-    group.add(m);
-  }
-  group.userData.scale = scale;
-  return group;
+  let sum = 0, verts = 0;
+  const fields = geometries.map((g) => {
+    const p = g.attributes.position, n = g.attributes.normal, E = new Float32Array(p.count);
+    for (let v = 0; v < p.count; v += 3) {            // one value per triangle corner set keeps this quick
+      const x = p.getX(v), y = p.getY(v), z = p.getZ(v), nx = n.getX(v), ny = n.getY(v), nz = n.getZ(v);
+      let e = 0;
+      for (let h = 0; h < hx.length; h++) {
+        const vx = hx[h] - x, vy = hy[h] - y, vz = hz[h] - z, d2 = vx * vx + vy * vy + vz * vz;
+        const at = nx * vx + ny * vy + nz * vz, from = dx[h] * vx + dy[h] * vy + dz[h] * vz;
+        if (at > 0 && from > 0) e += area[h] * at * from / (Math.PI * d2 * d2);
+      }
+      E[v] = E[v + 1] = E[v + 2] = e; sum += e; verts++;
+    }
+    return E;
+  });
+  const albedo = 0.45, shared = (sum / verts) * albedo / (1 - albedo);
+  geometries.forEach((g, i) => {
+    const E = fields[i], baked = new Float32Array(E.length * 3);
+    for (let v = 0; v < E.length; v++) { const e = E[v] + shared; baked[v * 3] = e * 0.74; baked[v * 3 + 1] = e * 0.86; baked[v * 3 + 2] = e; }
+    g.setAttribute('baked', new THREE.BufferAttribute(baked, 3));
+  });
 }
 
 // ----------------------------------------------------------------- vegetation
@@ -223,13 +186,13 @@ function cypressGeometry(seg, rings, seed, H, core) {
 }
 
 /** Up-swept foliage sprays around the core, shaded as if the crown were one soft mass. */
-function cypressSprays(count, seed, H) {
+function cypressSprays(count, seed, H, grow = 1) {
   const r = rng(seed * 997 + 3), pos = [], nor = [], uv = [], col = [], idx = [];
   const tangent = new THREE.Vector3(), rise = new THREE.Vector3(), normal = new THREE.Vector3(), c = new THREE.Vector3();
   for (let i = 0; i < count; i++) {
     const t = 0.03 + 0.95 * r() ** 0.8, a = r() * Math.PI * 2, z = CYPRESS_BASE + t * (H - CYPRESS_BASE), ca = Math.cos(a), sa = Math.sin(a);
     const radius = CYPRESS_R * cypressOutline(t) * (0.82 + 0.2 * r()), slim = 0.55 + 0.6 * (1 - t);
-    const w = (0.8 + 0.35 * r()) * slim, h = (1.5 + 0.7 * r()) * slim, lean = -0.12 - 0.22 * t;
+    const w = (0.8 + 0.35 * r()) * slim * grow, h = (1.5 + 0.7 * r()) * slim * grow, lean = -0.12 - 0.22 * t;
     tangent.set(-sa, 0, ca); rise.set(ca * lean, 1, sa * lean).normalize(); normal.set(ca, 0.28, sa).normalize();
     c.set(ca * radius, z - h * 0.4, sa * radius);
     const shade = (0.5 + 0.55 * smooth(0, 0.3, t)) * (0.78 + 0.36 * r()), base = pos.length / 3;
@@ -293,13 +256,16 @@ function makeTrees(buffer, foliage, sprays, scene) {
   const trunks = new THREE.InstancedMesh(trunkGeo, bark, nTrees);
   const sets = [];
   for (let v = 0; v < VARIANTS; v++) {
-    const far = new THREE.InstancedMesh(cypressGeometry(14, 14, v * 9.1, heights[v], false), foliage, nTrees);
+    // every tree carries real foliage; further off, fewer and larger sprays stand in for the same mass
+    const far = new THREE.InstancedMesh(cypressGeometry(10, 10, v * 9.1, heights[v], true), foliage, nTrees);
     const near = new THREE.InstancedMesh(cypressGeometry(24, 30, v * 9.1, heights[v], true), foliage, nTrees);
-    const fronds = new THREE.InstancedMesh(cypressSprays(420, v * 9.1, heights[v]), sprays, nTrees);
-    far.castShadow = true; far.receiveShadow = near.receiveShadow = fronds.receiveShadow = true;
-    far.frustumCulled = near.frustumCulled = fronds.frustumCulled = false;
+    const lean = matchMedia('(pointer: coarse)').matches ? 0.5 : 1;   // phones get half the sprays, each larger
+    const fronds = new THREE.InstancedMesh(cypressSprays(420 * lean, v * 9.1, heights[v], 1 / Math.sqrt(lean)), sprays, nTrees);
+    const farFronds = new THREE.InstancedMesh(cypressSprays(150 * lean, v * 9.1, heights[v], 1.65 / Math.sqrt(lean)), sprays, nTrees);
+    for (const mesh of [far, near, fronds, farFronds]) { mesh.frustumCulled = false; mesh.receiveShadow = true; }
+    far.castShadow = near.castShadow = true;
     near.count = fronds.count = 0;
-    sets.push({ far, near, fronds }); scene.add(far, near, fronds);
+    sets.push({ far, near, fronds, farFronds }); scene.add(far, near, fronds, farFronds);
   }
   for (let i = 0; i < nTrees; i++) {
     const o = i * 6, t = { x: data[o], y: data[o + 1], z: data[o + 2], r: 1.35, v: i % VARIANTS };   // crowns nearly touch: the rows are hedges
@@ -319,12 +285,13 @@ function makeTrees(buffer, foliage, sprays, scene) {
     for (const t of trees) {
       const d = (t.x - x) ** 2 + (t.z - z) ** 2, set = sets[t.v], c = counts[t.v];
       const isNear = d < n2, mesh = isNear ? set.near : set.far, k = isNear ? c[0]++ : c[1]++;
+      const leaves = isNear ? set.fronds : set.farFronds;
       mesh.setMatrixAt(k, t.matrix); mesh.setColorAt(k, t.color);
-      if (isNear) { set.fronds.setMatrixAt(k, t.matrix); set.fronds.setColorAt(k, t.color); }
+      leaves.setMatrixAt(k, t.matrix); leaves.setColorAt(k, t.color);
     }
     sets.forEach((set, v) => {
-      set.near.count = set.fronds.count = counts[v][0]; set.far.count = counts[v][1];
-      for (const mesh of [set.near, set.far, set.fronds]) {
+      set.near.count = set.fronds.count = counts[v][0]; set.far.count = set.farFronds.count = counts[v][1];
+      for (const mesh of [set.near, set.far, set.fronds, set.farFronds]) {
         mesh.instanceMatrix.needsUpdate = true;
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       }
@@ -348,7 +315,7 @@ function makeTrees(buffer, foliage, sprays, scene) {
   }
   woods.frustumCulled = false;
   scene.add(woods);
-  return { hash, updateLOD, count: nTrees };
+  return { hash, updateLOD, count: nTrees, castShadows(on) { for (const s of sets) s.far.castShadow = s.near.castShadow = on; } };
 }
 
 function makeGround(grassMap, grassNormal) {
@@ -416,32 +383,100 @@ function makeSky(renderer, scene) {
   return sky;
 }
 
+/** The small flames of the passage lamps. Their light on the stone is in the bake. */
+function makeLamps(buffer) {
+  const n = new Uint32Array(buffer, 0, 1)[0], g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(buffer, 4, n * 3), 3));
+  const flames = new THREE.Points(g, new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { t: { value: 0 }, scale: { value: 800 } },
+    vertexShader: `uniform float scale; varying float vSeed;
+      void main(){ vSeed = position.x + position.z; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = 0.42 * scale / -mv.z; gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `uniform float t; varying float vSeed;
+      void main(){ vec2 p = gl_PointCoord - vec2(0.5, 0.62); p.x += 0.05 * sin(t * 9.0 + vSeed) * (0.6 - p.y);
+        float w = 0.2 * (1.0 - smoothstep(-0.5, 0.45, -p.y)) + 0.015, a = (1.0 - smoothstep(0.0, 1.0, abs(p.x) / w)) * smoothstep(0.62, 0.3, abs(p.y));
+        gl_FragColor = vec4(vec3(2.6, 1.1, 0.26) * a * a, 1.0); }`,
+  }));
+  flames.frustumCulled = false;
+  return flames;
+}
+
+/** The brazier: a turbulent flame, sparks and smoke, and a real light thrown on the stone round it. */
 function makeFire() {
   const group = new THREE.Group();
-  group.position.set(0, 64, 78);
-  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.95, 2.6, 16, 1, true).translate(0, 4.1, 0),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(7, 2.6, 0.5), side: THREE.DoubleSide, transparent: true, opacity: 0.9, depthWrite: false }));
+  group.position.set(0, 66.75, 78);
+
+  const flame = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 10.5).translate(0, 5.1, 0), new THREE.ShaderMaterial({
+    transparent: true, premultipliedAlpha: true, depthWrite: false, side: THREE.DoubleSide, uniforms: { t: { value: 0 } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `uniform float t; varying vec2 vUv;
+      float h(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float n(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(h(i), h(i + vec2(1, 0)), f.x), mix(h(i + vec2(0, 1)), h(i + vec2(1, 1)), f.x), f.y); }
+      float fbm(vec2 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++) { s += a * n(p); p = p * 2.03 + 11.7; a *= 0.5; } return s; }
+      void main(){
+        float y = vUv.y, x = vUv.x - 0.5;
+        x += (fbm(vec2(vUv.x * 2.2, y * 1.9 - t * 1.25)) - 0.5) * 0.85 * y;           // the whole body sways
+        x += (n(vec2(y * 5.0 - t * 2.6, 3.0)) - 0.5) * 0.16 * y;
+        float width = 0.36 * pow(max(1.0 - y, 0.0), 0.9) * smoothstep(-0.03, 0.08, y) + 0.002;
+        float body = 1.0 - abs(x) / width;
+        float tongues = fbm(vec2(vUv.x * 8.5 + t * 0.2, y * 5.2 - t * 3.3));         // licks that tear free as they rise
+        float heat = body + (tongues - 0.52) * (0.9 + 2.4 * y) - y * 0.32;
+        float cover = smoothstep(0.02, 0.2, heat);
+        vec3 c = mix(vec3(0.72, 0.07, 0.0), vec3(1.0, 0.36, 0.02), smoothstep(0.08, 0.42, heat));
+        c = mix(c, vec3(1.0, 0.8, 0.28), smoothstep(0.42, 0.85, heat));
+        c = mix(c, vec3(1.0, 0.95, 0.68), smoothstep(0.85, 1.2, heat) * (1.0 - y));
+        gl_FragColor = vec4(c * cover, cover * 0.94);
+      }`,
+  }));
   group.add(flame);
-  const c = document.createElement('canvas'); c.width = c.height = 128;
-  const x = c.getContext('2d'), g = x.createRadialGradient(64, 64, 4, 64, 64, 64);
-  g.addColorStop(0, 'rgba(255,255,255,.75)'); g.addColorStop(0.5, 'rgba(255,255,255,.26)'); g.addColorStop(1, 'rgba(255,255,255,0)');
-  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
-  const map = new THREE.CanvasTexture(c), puffs = [], r = rng(11);
-  for (let i = 0; i < 30; i++) {
-    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map, color: 0x6f6b66, transparent: true, depthWrite: false, opacity: 0 }));
-    s.userData = { t: i / 30, x: r() * 2 - 1, z: r() * 2 - 1 };
-    group.add(s); puffs.push(s);
+
+  const light = new THREE.PointLight(0xff9a48, 0, 70, 1.5);
+  light.position.y = 3.5;
+  group.add(light);
+
+  // sparks carried up by the heat
+  const SPARKS = 90, spark = new Float32Array(SPARKS * 3), seed = [], r = rng(11);
+  for (let i = 0; i < SPARKS; i++) seed.push({ t: r(), a: r() * 6.28, s: 0.5 + r(), w: r() * 2 - 1 });
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute('position', new THREE.BufferAttribute(spark, 3));
+  const sparks = new THREE.Points(sg, new THREE.PointsMaterial({ color: new THREE.Color(6, 2.2, 0.4), size: 0.16, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+  sparks.frustumCulled = false;
+  group.add(sparks);
+
+  // smoke drawn as lumpy billows rather than soft discs
+  const c = document.createElement('canvas'); c.width = c.height = 192;
+  const x = c.getContext('2d');
+  for (let i = 0; i < 46; i++) {
+    const a = r() * 6.28, d = r() ** 1.5 * 56, px = 96 + Math.cos(a) * d, py = 96 + Math.sin(a) * d, rad = 18 + r() * 26;
+    const g = x.createRadialGradient(px, py, 1, px, py, rad);
+    g.addColorStop(0, 'rgba(255,255,255,.2)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    x.fillStyle = g; x.fillRect(0, 0, 192, 192);
+  }
+  const map = new THREE.CanvasTexture(c), puffs = [];
+  for (let i = 0; i < 42; i++) {
+    const m = new THREE.Sprite(new THREE.SpriteMaterial({ map, color: 0x4a4744, transparent: true, depthWrite: false, opacity: 0, rotation: r() * 6.28 }));
+    m.userData = { t: i / 42, x: r() * 2 - 1, z: r() * 2 - 1, spin: (r() - 0.5) * 0.3 };
+    group.add(m); puffs.push(m);
   }
   return {
     group,
-    update(dt, time) {
-      flame.scale.set(1 + 0.12 * Math.sin(time * 13), 1 + 0.2 * Math.sin(time * 9.3) + 0.08 * Math.sin(time * 21), 1 + 0.12 * Math.cos(time * 11));
-      for (const s of puffs) {
-        const d = s.userData; d.t = (d.t + dt * 0.042) % 1;
-        const t = d.t, y = 6 + t * 58;
-        s.position.set(d.x * (1 + t * 6) + t * t * 24, y, d.z * (1 + t * 6));
-        const size = 3 + t * 21; s.scale.set(size, size, 1);
-        s.material.opacity = 0.5 * smooth(0, 0.06, t) * (1 - smooth(0.4, 1, t));
+    update(dt, time, camera) {
+      group.rotation.y = Math.atan2(camera.position.x - group.position.x, camera.position.z - group.position.z);
+      flame.material.uniforms.t.value = time;
+      light.intensity = 900 * (0.8 + 0.2 * Math.sin(time * 11.3) * Math.sin(time * 7.1) + 0.12 * Math.sin(time * 23));
+      seed.forEach((k, i) => {
+        k.t = (k.t + dt * 0.11 * k.s) % 1;
+        const y = 1.5 + k.t * k.t * 34, spread = 0.7 + k.t * 7;
+        spark.set([Math.sin(k.a + k.t * 9) * spread * k.w + k.t * k.t * 16, y, Math.cos(k.a + k.t * 7) * spread * k.w], i * 3);
+      });
+      sg.attributes.position.needsUpdate = true;
+      for (const m of puffs) {
+        const d = m.userData; d.t = (d.t + dt * 0.03) % 1;
+        const t = d.t, y = 6 + t * 74;
+        m.position.set(d.x * (1 + t * 9) + t * t * 42, y, d.z * (1 + t * 9));
+        const size = 4 + t * 34; m.scale.set(size, size, 1);
+        m.material.rotation += d.spin * dt;
+        m.material.opacity = 0.34 * smooth(0, 0.07, t) * (1 - smooth(0.35, 1, t));
       }
     },
   };
@@ -451,7 +486,7 @@ function makeVisitors(scene) {
   const r = rng(5), spots = [[-8, 5.5, 132, 5], [9, 5.5, 136, 3], [-6, 5.5, 60, 4], [11, 5.5, 50, 3], [-14, 46.5, 96, 4], [10, 46.5, 98, 3],
                              [-17, 0, 178, 4], [15, 0, 188, 3], [-26, 0, 310, 2], [26, 0, 430, 3], [3.2, 9.5, 2.5, 2], [-24, 5.5, 150, 2], [-11, 9.5, -4, 4], [13, 9.5, 8, 4], [-8, 9.5, 12, 3], [15, 9.5, -12, 3],
                              [-30, 5.5, 140, 5], [34, 5.5, 128, 4], [0, 0, 198, 6], [6, 64, 73, 3], [-22, 46.5, 92, 3], [24, 0, 640, 3], [-27, 0, 560, 2]];
-  const black = new THREE.MeshBasicMaterial({ color: 0x0b0c0f }), list = [];
+  const black = new THREE.MeshBasicMaterial({ color: 0x000000, fog: false }), list = [];
   for (const g of figureGeometries()) {
     const mesh = new THREE.InstancedMesh(g, black, 40);
     mesh.frustumCulled = false; mesh.count = 0; mesh.castShadow = true; list.push(mesh); scene.add(mesh);
@@ -470,6 +505,7 @@ export async function loadWorld(renderer, onProgress) {
   manager.onProgress = (_, done, total) => onProgress(done / total);
   const T = (name, srgb = false) => load(name, srgb, renderer, manager);
 
+  placeSun(0.3);
   const scene = new THREE.Scene();
   scene.fog = new THREE.FogExp2(0xd3dbe3, 0.00045 * Math.sqrt(SCALE));   // aerial haze, none up close
 
@@ -480,28 +516,29 @@ export async function loadWorld(renderer, onProgress) {
   const stone = T('stone', true), stoneN = T('stone_n');
   const dressed = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.5), roughness: 0.74 }), { streaks: 0.4 });
   const sphere = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.25), roughness: 0.72, envMapIntensity: 0.45 }), { courses: true });
-  const vault = weathered(std({ color: 0x8a8173, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.9, envMapIntensity: 0.2, dithering: true }), { courses: true, streaks: 0.6 });
+  const vault = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.9, dithering: true }), { courses: true, streaks: 0.6 });
   const paving = weathered(std({ color: LIMESTONE, map: T('paving', true), normalMap: T('paving_n'), normalScale: nS(0.7) }), { streaks: 0 });
-  const gravel = weathered(std({ color: new THREE.Color(1.7, 1.52, 1.24), map: T('gravel', true), normalMap: T('gravel_n'), normalScale: nS(0.5), roughness: 0.94 }), { streaks: 0 });
+  const gravel = weathered(std({ color: new THREE.Color(1.22, 1.08, 0.88), map: T('gravel', true), normalMap: T('gravel_n'), normalScale: nS(0.5), roughness: 0.94 }), { streaks: 0 });
   const soil = std({ map: T('soil', true), roughness: 0.97 });
   const foliage = std({ map: T('cypress', true), normalMap: T('cypress_n'), normalScale: nS(1.2), vertexColors: true, roughness: 0.86 });
-  const sprays = std({ map: sprayTexture(renderer), alphaTest: 0.42, vertexColors: true, roughness: 0.9 });
+  const sprays = std({ map: sprayTexture(renderer), alphaTest: 0.42, alphaToCoverage: true, vertexColors: true, roughness: 0.9 });
   const grass = [T('grass', true), T('grass_n')];
   const MATS = {
-    'Vault: pierced shell (star holes)': [vault, 12, true], 'Limestone ashlar': [ashlar, 15.6 / SCALE], 'Limestone dressed': [dressed, 12 / SCALE], 'Limestone sphere': [sphere, 12, true],
+    'Vault: pierced shell (star holes)': [vault, 12, true], Bore: [dressed, 12 / SCALE], 'Limestone ashlar': [ashlar, 15.6 / SCALE], 'Limestone dressed': [dressed, 12 / SCALE], 'Limestone sphere': [sphere, 12, true],
     'Limestone paving': [paving, 6.4 / SCALE], 'Gravel (terrace walks)': [gravel, 4 / SCALE], 'Planting bed (soil, needle litter)': [soil, 3 / SCALE],
   };
 
   const draco = new DRACOLoader(manager).setDecoderPath('./draco/');
   const gltfLoader = new GLTFLoader(manager).setDRACOLoader(draco);
   const fileLoader = new THREE.FileLoader(manager).setResponseType('arraybuffer');
-  const [gltf, treeBuf, holeBuf] = await Promise.all([gltfLoader.loadAsync('assets/monument.glb'), fileLoader.loadAsync('assets/trees.bin'), fileLoader.loadAsync('assets/holes.bin')]);
+  const [gltf, treeBuf, holeBuf, lampBuf] = await Promise.all([gltfLoader.loadAsync('assets/monument.glb'), fileLoader.loadAsync('assets/trees.bin'),
+    fileLoader.loadAsync('assets/holes.bin'), fileLoader.loadAsync('assets/lamps.bin')]);
   draco.dispose();
 
   const root = gltf.scene, solids = [];
   root.updateMatrixWorld(true);
   const nameOf = (o) => { let n = o; while (n.parent && n.parent !== root) n = n.parent; return n.userData.name ?? n.name; };
-  const meshes = [];
+  const meshes = [], inside = [];
   root.traverse((o) => { if (o.isMesh) meshes.push(o); });
   for (const mesh of meshes) {
     const name = nameOf(mesh), isHelper = name.startsWith('COL_');
@@ -512,15 +549,18 @@ export async function loadWorld(renderer, onProgress) {
     }
     if (isHelper) { mesh.visible = false; continue; }
     const key = mesh.material.name;
-    if (key === 'Bore') { mesh.material = boreMaterial(); mesh.castShadow = true; continue; }
     if (MATS[key]) {
       const [mat, tile, sph] = MATS[key];
-      mesh.geometry = stoneUVs(mesh.geometry, tile, sph);
+      const g = stoneUVs(mesh.geometry, tile, sph);
+      if (g.attributes.color) { g.setAttribute('baked', g.attributes.color); g.deleteAttribute('color'); }
+      mesh.geometry = g;
       mesh.material = mat;
+      if (key.startsWith('Vault') || name === 'Interior floor' || name.startsWith('Sarcophagus')) inside.push(g);
     }
     mesh.castShadow = key !== 'Planting bed (soil, needle litter)';
     mesh.receiveShadow = true;
   }
+  skyThroughHoles(holeBuf, inside);
   scene.add(root);
 
   const collider = mergeGeometries(solids);
@@ -531,34 +571,46 @@ export async function loadWorld(renderer, onProgress) {
   const water = makeBasin();
   scene.add(water);
   const sky = makeSky(renderer, scene);
-  const stars = vaultLight(holeBuf);
-  scene.add(stars);
   const fire = makeFire();
   scene.add(fire.group);
   makeVisitors(scene);
+  const lamps = makeLamps(lampBuf);
+  scene.add(lamps);
 
-  // Sun. It never moves, so its shadow map is drawn once and kept.
-  const sun = new THREE.DirectionalLight(0xffdfb8, 4.0);
-  sun.target.position.set(0, 0, 170);
-  sun.position.copy(sun.target.position).addScaledVector(SUN, 1100);
+
+  // The sun is the only light here. Outdoors its shadow map covers the whole site; underground and
+  // in the void it closes in on the shell, fine enough to resolve the bores it shines through.
+  const sun = new THREE.DirectionalLight(0xffe2bf, 3.8);
   sun.castShadow = true;
-  const mobile = matchMedia('(pointer: coarse)').matches;
-  sun.shadow.mapSize.setScalar(mobile ? 2048 : 4096);
-  Object.assign(sun.shadow.camera, { left: -560, right: 560, top: 520, bottom: -520, near: 300, far: 1900 });
-  sun.shadow.camera.updateProjectionMatrix();
+  sun.shadow.mapSize.setScalar(matchMedia('(pointer: coarse)').matches ? 2048 : 4096);
   sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.35; sun.shadow.radius = 2.2;
   scene.add(sun, sun.target);
+  let close = false;
+  const low = new THREE.Color(0xffb878), high = new THREE.Color(0xfff0dc);
+  const skyUniforms = sky.material.uniforms;
+  const refresh = () => {
+    const cam = sun.shadow.camera, half = close ? 170 : 560;
+    sun.target.position.set(0, 0, close ? 0 : 170);
+    sun.position.copy(sun.target.position).addScaledVector(SUN, 1100);
+    Object.assign(cam, { left: -half, right: half, top: close ? half : 520, bottom: close ? -half : -520, near: 300, far: 1900 });
+    cam.updateProjectionMatrix();
+    sun.shadow.bias = close ? -0.00006 : -0.0003;
+    sun.shadow.normalBias = close ? 0.03 : 0.35;
+    sun.shadow.radius = close ? 1 : 2.2;
+    renderer.shadowMap.needsUpdate = true;
+  };
+  const setSun = (u) => {
+    placeSun(u);
+    skyUniforms.sunPosition.value.copy(SUN);
+    const lift = smooth(0.1, 0.6, SUN.y);
+    sun.color.lerpColors(low, high, lift);
+    sun.intensity = 2.6 + 1.1 * lift;
+    SKY_LEVEL.value = 0.5 + 0.5 * lift;
+    sun.position.copy(sun.target.position).addScaledVector(SUN, 1100);
+  };
+  const shadowsClose = (on) => { if (on !== close) { close = on; trees.castShadows(!on); refresh(); } };
+  refresh();
 
-  // warm light thrown back up from the sunlit stone and ground, under the bridge especially
-  const bounce = new THREE.HemisphereLight(0xa9c4ee, 0xb08f64, 0.3);
-  scene.add(bounce);
+  return { scene, bvh, trees, water, sky, fire, sun, setSun, refresh, shadowsClose, lamps };
 
-  const inner = new THREE.PointLight(0xdfe4ee, 0, 0, 0);     // daylight scattered about the void, only felt indoors
-  inner.position.copy(CENTER);
-  scene.add(inner);
-
-  const lantern = new THREE.PointLight(0xffc88a, 0, 16, 1.4);  // what you carry into the passages
-  scene.add(lantern);
-
-  return { scene, bvh, trees, water, stars, sky, fire, sun, inner, bounce, lantern };
 }

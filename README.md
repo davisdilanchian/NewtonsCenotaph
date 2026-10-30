@@ -4,9 +4,9 @@ A to-scale 3D model of Étienne-Louis Boullée's *Cénotaphe de Newton* (1784), 
 
 **[Walk through it in your browser](https://davisdilanchian.github.io/NewtonsCenotaph/)** (first-person, three.js).
 
-The page and the model's figures read the monument at 3× its published size: a 450 m sphere. That is a choice for the sense of size, not a finding. The drawing's own figures stay closer to 150 m, but 3× is the largest size at which everything stays believable, with the cypresses at a real 30 m. Add `?scale=1`, `?scale=2` or `?scale=5` to the page's address to compare. Model units stay in the published 150 m scale; only the figures change.
+The page and the model's figures read the monument at 3× its published size: a 450 m sphere, judged by eye from the people and cypresses. Measured directly, the drawn figures put it closer to 130–180 m (see below), so 450 m is a choice for the sense of size, not a finding. Add `?scale=1`, `?scale=2` or `?scale=5` to compare. Model units stay in the published 150 m scale; only the figures change.
 
-Controls: WASD to walk, Shift to run, Space to jump, mouse to look, Esc to free the cursor, 1–7 to jump between places, R to reset. On a phone, use the on-screen stick and drag to look.
+Controls: WASD to walk, Shift to run, Space to jump, mouse to look, Esc to free the cursor, 1–7 to jump between places, R to reset, hold T to run the sun, [ and ] to change the field of view. On a phone, use the on-screen stick and drag to look.
 
 ## Folder
 
@@ -65,7 +65,7 @@ Origin is the sphere's axis at natural ground. The front (main stair, tunnel) fa
 | Upper tier | Ø164 m wall, cornice Ø166 m, top at 64 m |
 | Front opening in the drum | cone cut around the sphere, ±42 m wide at terrace level, ±74 m under the cornice; the cornice runs across as a bridge |
 | Front stair block | solid block against the upper tier, 79 m wide at the bridge, 21 m at the top, 21 m deep, with a flight of 292 risers of 0.06 units on each side and the small door at its foot |
-| Passages | 3.9 units high and 4.4 wide, from two doors beside the main stair, under the whole terrace, meeting under the sphere: about 160 units long |
+| Passages | 3.9 units high and 4.4 wide, from the front arch and from two doors beside the main stair, meeting under the sphere. The door routes run about 160 units under the whole terrace |
 | Ramp | climbs at about 24° through the floor to the sarcophagus at 9.5 units |
 | Vault openings | 2,200 bores cut by boolean through the shell, above the upper tier, aimed at the sarcophagus and flaring inward |
 
@@ -105,12 +105,22 @@ If you want a concrete version, swap the `Limestone ashlar` and `Limestone dress
 - How deep the front bridge is can't be read from an elevation. It is modelled as the full width of the drum cornice.
 - The front stairs are read as a solid block standing against the upper tier, not a V cut into it. A cut left the tier overhanging its own stairs, and the block fits the hatched band in front of the tier on the plan and the door at the foot of the trapezoid on the elevation.
 - The drawings show no stair from the ground terrace up to the drum terrace, so the page has none. Its number keys jump there instead.
-- The section (sheet 04) shows a long, low passage under the floor, rising to the sarcophagus. The doors beside the main stair are my reading: the section doesn't run through the front, and the arch in the elevation stands too close to the centre to start a long passage, so that arch is modelled as a sealed door.
-- The shafts of sunlight on the page are artistic: bores this narrow would pass direct sun for only a few minutes.
+- The section (sheet 04) shows a long, low passage under the floor, rising to the sarcophagus. The doors beside the main stair are my reading: the section doesn't run through the front, and the arch in the elevation stands close to the centre.
+- The bores are aimed at the sarcophagus so the sky shows from the floor, and the oil lamps in the passages are my addition: without them the middle of a passage is pitch dark.
 - The drawings show the lions only as small dark shapes, so their pose and modelling are my reading. The brazier, small portal and people are simplified stand-ins for scale.
 - The interior galleries shown in the section, inside the drum, are not modelled. The drum is solid.
 - Seen from a few metres away, the cypress foliage looks lumpy. It reads well from the normal viewing distances.
 - The landscape (meadow, hills, woodland, basin, allée) is invented scenery.
+
+## Lighting on the page
+
+Nothing inside is painted on. The sun moves across the sky, and everything it does comes from the geometry:
+
+- **Sun:** one light with a shadow map. Underground and in the void the map closes in on the shell, fine enough to resolve the bores, so light lands only where a bore really lines up with the sun.
+- **Shafts in the air:** each pixel's ray is marched through that same shadow map, in `web/src/sunshafts.js`.
+- **Sky light inside the sphere:** the form factor from every bore to every vertex, plus the exact interreflection for a closed sphere.
+- **Sky light and bounce elsewhere:** path traced in Cycles into the vertices by `scripts/export_web.py`, along with the passage lamps. The bounce is baked from a midday sun, so it doesn't move with the sun.
+- **Exposure:** the eye adapts as you go from daylight into the dark.
 
 ## Sources
 
