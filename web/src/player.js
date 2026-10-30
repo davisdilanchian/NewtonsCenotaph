@@ -2,8 +2,8 @@
 // trees. The collision step follows the three-mesh-bvh character example (MIT).
 import * as THREE from 'three';
 
-export const RADIUS = 0.32, HEIGHT = 1.75;
-const GRAVITY = 22, JUMP = 6.4, WALK = 3.2, RUN = 9.5, WORLD_R = 790, SUBSTEPS = 4;
+export const RADIUS = 0.32, HEIGHT = 1.75, WALK = 2.2;
+const GRAVITY = 22, JUMP = 6.4, RUN = 9.5, WORLD_R = 790, SUBSTEPS = 4;
 
 const box = new THREE.Box3(), seg = new THREE.Line3(), triPt = new THREE.Vector3(), capPt = new THREE.Vector3();
 const delta = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);

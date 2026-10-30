@@ -342,7 +342,7 @@ function makeVisitors(scene) {
   });
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
   for (const [x, y, z, n] of spots) for (let i = 0; i < n; i++) {
-    p.set(x + (r() - 0.5) * 4, y, z + (r() - 0.5) * 4); q.setFromAxisAngle(up, r() * 6.28); s.setScalar(0.94 + r() * 0.1);
+    p.set(x + (r() - 0.5) * 4, y, z + (r() - 0.5) * 4); q.setFromAxisAngle(up, r() * 6.28); s.setScalar(0.9 + r() * 0.1);
     const mesh = list[Math.floor(r() * list.length)];
     mesh.setMatrixAt(mesh.count++, m.compose(p, q, s));
   }
@@ -355,7 +355,7 @@ export async function loadWorld(renderer, onProgress) {
   const T = (name, srgb = false) => load(name, srgb, renderer, manager);
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0xc7d5e4, 0.00011);
+  scene.fog = new THREE.FogExp2(0xc7d5e4, 0.00045);   // aerial haze: about 10% at the basin, none up close
 
   const std = (o) => new THREE.MeshStandardMaterial({ roughness: 0.82, metalness: 0, ...o });
   const LIMESTONE = 0xe6d6b8;      // warms and tones down the neutral stone textures

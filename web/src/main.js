@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { loadWorld, groundHeight, CENTER } from './world.js';
-import { Player, RADIUS } from './player.js';
+import { Player, RADIUS, WALK } from './player.js';
 import { clamp, lerp } from './util.js';
 
 const $ = (id) => document.getElementById(id);
@@ -19,7 +19,8 @@ renderer.shadowMap.autoUpdate = false;
 document.body.prepend(renderer.domElement);
 const canvas = renderer.domElement;
 
-const camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.1, 24000);
+const FOV = 55;                                 // near natural vision; wider shrinks the sphere
+const camera = new THREE.PerspectiveCamera(FOV, innerWidth / innerHeight, 0.1, 24000);
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
@@ -35,6 +36,42 @@ const PLACES = [
   { name: 'The drum terrace', note: 'Four rows of cypress', at: [-66, 46.5, 64], look: [-94, 47, 0] },
   { name: 'The upper tier', note: '64 m up, against the sphere', at: [-49, 64, 58.4], look: [40, 66, 70] },
 ];
+
+// Boullée's six sheets on the title screen.
+const SHEETS = [
+  { file: 'perspective', name: 'Perspective', alt: 'The sphere rising above its cypress-ringed terraces under a dark sky' },
+  { file: 'elevation', name: 'Elevation', alt: 'Front elevation of the sphere on a stepped circular base ringed with cypresses' },
+  { file: 'plan', name: 'Plan', alt: 'Plan from above, with the rings of cypresses around the sphere' },
+  { file: 'section-day', name: 'Section by day', alt: 'Section through the sphere, its dark vault pierced with stars' },
+  { file: 'section-night', name: 'Section by night', alt: 'Section through the sphere, lit by a blazing armillary sphere hung at its centre' },
+  { file: 'interior', name: 'Interior', alt: 'The starry vault seen from inside, with tiny figures at the sarcophagus' },
+];
+let sheetTimer = 0;
+
+function showSheets() {
+  const pictures = [], thumbs = [];
+  const pick = (n) => {
+    pictures.forEach((img, i) => img.classList.toggle('on', i === n));
+    thumbs.forEach((b, i) => b.setAttribute('aria-pressed', i === n));
+    $('sheetName').textContent = SHEETS[n].name;
+    current = n;
+  };
+  let current = 0;
+  SHEETS.forEach((s, i) => {
+    const src = `assets/sheets/${s.file}.jpg`;
+    const img = new Image();
+    img.src = src; img.alt = s.alt;
+    $('sheet').append(img); pictures.push(img);
+    const b = document.createElement('button');
+    b.setAttribute('aria-label', s.name);
+    b.innerHTML = `<img src="${src}" alt="">`;
+    b.addEventListener('click', () => { clearInterval(sheetTimer); pick(i); });
+    $('thumbs').append(b); thumbs.push(b);
+  });
+  pick(0);
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches)
+    sheetTimer = setInterval(() => pick((current + 1) % SHEETS.length), 6000);
+}
 
 let world, player;
 const keys = new Set();
@@ -82,14 +119,14 @@ function readInput() {
 
 function updateCamera(dt) {
   const p = player.pos, grounded = player.airTime < 0.12;
-  stride = lerp(stride, grounded ? Math.min(1, player.speed / 3.2) : 0, Math.min(1, dt * 10));
+  stride = lerp(stride, grounded ? Math.min(1, player.speed / WALK) : 0, Math.min(1, dt * 10));
   bob += dt * player.speed * 2.1;
   camera.position.set(
     p.x + Math.cos(player.yaw) * Math.cos(bob) * 0.012 * stride,
     p.y - RADIUS + EYE + Math.abs(Math.sin(bob)) * 0.04 * stride - player.dip,
     p.z - Math.sin(player.yaw) * Math.cos(bob) * 0.012 * stride);
   camera.rotation.set(player.pitch, player.yaw, 0, 'YXZ');
-  const fov = 72 + clamp(player.speed - 4, 0, 6) * 0.8;
+  const fov = FOV + clamp(player.speed - 4, 0, 6) * 0.8;
   if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = lerp(camera.fov, fov, Math.min(1, dt * 6)); camera.updateProjectionMatrix(); }
 }
 
@@ -220,6 +257,7 @@ async function start() {
   enter.hidden = false;
   enter.focus();
   enter.addEventListener('click', () => {
+    clearInterval(sheetTimer);
     $('intro').classList.add('gone');
     $('hud').classList.add('on');
     started = true;
@@ -227,6 +265,7 @@ async function start() {
   });
 }
 
+showSheets();
 start().catch((e) => {
   console.error(e);
   const box = $('err');

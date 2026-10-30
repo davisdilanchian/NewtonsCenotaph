@@ -15,10 +15,19 @@
   button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 
   /* title screen */
-  #intro { position: fixed; inset: 0; z-index: 10; display: grid; align-content: center; justify-items: center; gap: 26px; padding: 24px;
-           text-align: center; background: var(--bg); transition: opacity .7s ease; }
+  #intro { position: fixed; inset: 0; z-index: 10; display: grid; align-content: safe center; justify-items: center; gap: 20px; padding: 24px;
+           overflow-y: auto; text-align: center; background: var(--bg); transition: opacity .7s ease; }
   #intro.gone { opacity: 0; pointer-events: none; }
-  #intro img { width: min(680px, 92vw, 92vh); max-height: 44vh; object-fit: contain; filter: grayscale(.3) brightness(.92); }
+  #sheets { --w: min(640px, 92vw, 56vh); width: var(--w); margin: 0; display: grid; gap: 8px; }
+  #sheet { position: relative; aspect-ratio: 1.64; }
+  #sheet img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; filter: grayscale(.3) brightness(.92); transition: opacity .9s ease; }
+  #sheet img.on { opacity: 1; }
+  #sheets figcaption { min-height: 1.3em; color: var(--dim); font-size: 13px; }
+  #thumbs { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  #thumbs button { aspect-ratio: 1.64; overflow: hidden; opacity: .5; outline: 1px solid transparent; outline-offset: 1px; transition: opacity .2s, outline-color .2s; }
+  #thumbs button:hover, #thumbs button:focus-visible { opacity: .85; }
+  #thumbs button[aria-pressed="true"] { opacity: 1; outline-color: var(--ink); }
+  #thumbs img { display: block; width: 100%; height: 100%; object-fit: cover; filter: grayscale(.3); }
   #intro h1 { margin: 0; font: 400 clamp(32px, 6vw, 58px)/1.05 var(--serif); letter-spacing: .01em; }
   #intro p { margin: 0; max-width: 54ch; color: var(--dim); font-size: 15px; line-height: 1.55; }
   #bar { width: min(320px, 70vw); height: 1px; background: var(--line); }
@@ -56,7 +65,11 @@
 </head>
 <body>
 <div id="intro">
-  <img src="assets/elevation.jpg" alt="Boullée's 1784 elevation drawing of the cenotaph: a vast sphere on a stepped circular base ringed with cypresses">
+  <figure id="sheets">
+    <div id="sheet"></div>
+    <figcaption id="sheetName"></figcaption>
+    <div id="thumbs" role="group" aria-label="Boullée's drawings"></div>
+  </figure>
   <h1>Cénotaphe de Newton</h1>
   <p>Étienne-Louis Boullée drew this 150-metre sphere for Isaac Newton in 1784. It was never built. This is every terrace and all 2,139 cypresses from his drawings, at full size.</p>
   <div id="bar"><i></i></div>

@@ -46,7 +46,7 @@ A full render of all seven views takes about 20 minutes on the M3. Use `--pct 40
 
 ## How the scale was set
 
-Boullée gives no scale bar. The sphere is consistently described as about 150 m (≈ 500 pieds), so the model fixes the sphere at **Ø150 m** and takes every other dimension from the drawings by proportion:
+The drawings used here carry no scale bar, and I found no figure from Boullée himself. Published descriptions give the sphere as about 150 m or 500 feet, so the model fixes it at **Ø150 m** and takes every other dimension from the drawings by proportion. As a check, the figures on sheet 03 are about 7.5–10 px tall against a 765 px sphere, which puts a 1.75 m person's sphere at 134–178 m.
 
 - Elevation (sheet 03): 1 px = 0.196 m. Used for heights.
 - Plan (sheet 01): 1 px = 0.3275 m. Used for radii and the tree rows.
