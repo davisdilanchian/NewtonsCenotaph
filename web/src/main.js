@@ -253,7 +253,7 @@ function tick(dt) {
 
   lodClock += dt;
   if (lodClock > 0.25 && lodAt.distanceTo({ x: p.x, y: p.z }) > 6) {
-    world.trees.updateLOD(p.x, p.z, 75); lodAt.set(p.x, p.z); lodClock = 0;
+    world.trees.updateLOD(p.x, p.z, 45); lodAt.set(p.x, p.z); lodClock = 0;
   }
 
   const label = placeLabel(player.feet);

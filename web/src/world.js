@@ -156,11 +156,11 @@ const CYPRESS_R = 1.42, CYPRESS_BASE = 0.55;
  */
 function cypressTree(sprays, sides, rings, seed, H) {
   const r = rng(Math.round(seed * 991) + 17), pos = [], nor = [], uv = [], col = [], idx = [];
-  const fat = Math.sqrt(64 / sprays), axis = new THREE.Vector3(), side = new THREE.Vector3(), out = new THREE.Vector3(), radial = new THREE.Vector3(), p = new THREE.Vector3();
+  const fat = Math.sqrt(120 / sprays), axis = new THREE.Vector3(), side = new THREE.Vector3(), out = new THREE.Vector3(), radial = new THREE.Vector3(), p = new THREE.Vector3();
   for (let i = 0; i < sprays; i++) {
     const t = ((i + 0.5) / sprays) ** 0.86, a = i * 2.39996 + (r() - 0.5) * 0.5, ca = Math.cos(a), sa = Math.sin(a);
-    const edge = CYPRESS_R * cypressOutline(Math.min(t + 0.06, 1)), length = (2.5 + r() * 1.1) * (1 - 0.42 * t) * (0.8 + 0.2 * fat);
-    const width = Math.max(0.15, (0.34 + r() * 0.12) * fat * (1.05 - 0.6 * t)), low = CYPRESS_BASE + t * (H - CYPRESS_BASE - length * 0.55);
+    const edge = CYPRESS_R * cypressOutline(Math.min(t + 0.06, 1)), length = (1.9 + r() * 1.0) * (1 - 0.42 * t) * (0.75 + 0.25 * fat);
+    const width = Math.max(0.12, (0.27 + r() * 0.1) * fat * (1.05 - 0.6 * t)), low = CYPRESS_BASE + t * (H - CYPRESS_BASE - length * 0.55);
     const hip = new THREE.Vector3(ca * edge * 0.3, low, sa * edge * 0.3), tip = new THREE.Vector3(ca * edge * (0.72 + r() * 0.26), low + length, sa * edge * (0.72 + r() * 0.26));
     axis.subVectors(tip, hip).normalize(); side.set(-sa, 0, ca); out.crossVectors(side, axis).negate();
     const base = pos.length / 3, tone = (0.6 + 0.46 * smooth(0, 0.4, t)) * (0.78 + r() * 0.42);
@@ -214,7 +214,7 @@ function makeTrees(buffer, foliage, scene) {
   const trunks = new THREE.InstancedMesh(trunkGeo, bark, nTrees);
   const sets = [];
   for (let v = 0; v < VARIANTS; v++) {
-    sets.push([[64, 6, 4], [30, 4, 3], [14, 3, 2]].map(([sprays, sides, rings]) => {
+    sets.push([[120, 5, 4], [46, 4, 3], [18, 3, 2]].map(([sprays, sides, rings]) => {
       const mesh = new THREE.InstancedMesh(cypressTree(sprays, sides, rings, v * 9.1, heights[v]), foliage, nTrees);
       mesh.frustumCulled = false; mesh.receiveShadow = mesh.castShadow = true; mesh.count = 0;
       scene.add(mesh);
@@ -225,7 +225,7 @@ function makeTrees(buffer, foliage, scene) {
     const o = i * 6, t = { x: data[o], y: data[o + 1], z: data[o + 2], r: 1.35, v: i % VARIANTS };   // crowns nearly touch: the rows are hedges
     p.set(t.x, t.y, t.z); q.setFromAxisAngle(yAxis, data[o + 3]); s.set(data[o + 4], data[o + 5], data[o + 4]);
     t.matrix = m.compose(p, q, s).clone();
-    tint.setHSL(0.29 + r() * 0.03, 0.42 + r() * 0.12, 0.26 + r() * 0.08);
+    tint.setHSL(0.3 + r() * 0.03, 0.5 + r() * 0.12, 0.3 + r() * 0.08);
     t.color = tint.clone();
     trunks.setMatrixAt(i, t.matrix);
     trees.push(t); hash.add(t);
@@ -235,7 +235,7 @@ function makeTrees(buffer, foliage, scene) {
 
   // three detail levels of the same tree, by distance from the walker
   function updateLOD(x, z, nearDist) {
-    const n2 = nearDist * nearDist, m2 = 16 * n2, counts = sets.map(() => [0, 0, 0]);
+    const n2 = nearDist * nearDist, m2 = 9 * n2, counts = sets.map(() => [0, 0, 0]);
     for (const t of trees) {
       const d = (t.x - x) ** 2 + (t.z - z) ** 2, lod = d < n2 ? 0 : d < m2 ? 1 : 2, k = counts[t.v][lod]++, mesh = sets[t.v][lod];
       mesh.setMatrixAt(k, t.matrix); mesh.setColorAt(k, t.color);
@@ -471,7 +471,9 @@ export async function loadWorld(renderer, onProgress) {
   const paving = weathered(std({ color: LIMESTONE, map: T('paving', true), normalMap: T('paving_n'), normalScale: nS(0.7) }), { streaks: 0 });
   const gravel = weathered(std({ color: new THREE.Color(1.22, 1.08, 0.88), map: T('gravel', true), normalMap: T('gravel_n'), normalScale: nS(0.5), roughness: 0.94 }), { streaks: 0 });
   const soil = std({ map: T('soil', true), roughness: 0.97 });
-  const foliage = new THREE.MeshLambertMaterial({ map: T('cypress', true), normalMap: T('cypress_n'), normalScale: nS(1.0), vertexColors: true });   // matte: leaves don't mirror the sky
+  const leaves = T('cypress', true);
+  const foliage = new THREE.MeshLambertMaterial({ map: leaves, normalMap: T('cypress_n'), normalScale: nS(1.0), vertexColors: true,   // matte: leaves don't mirror the sky
+                                                  emissive: 0x4c5a4c, emissiveMap: leaves });                                          // this material ignores the sky, so its light is added here
   const grass = [T('grass', true), T('grass_n')];
   const MATS = {
     'Vault: pierced shell (star holes)': [vault, 12, true], Bore: [boreStone, 12 / SCALE], 'Limestone ashlar': [ashlar, 15.6 / SCALE], 'Limestone dressed': [dressed, 12 / SCALE], 'Limestone sphere': [sphere, 12, true],
