@@ -471,7 +471,7 @@ export async function loadWorld(renderer, onProgress) {
   const paving = weathered(std({ color: LIMESTONE, map: T('paving', true), normalMap: T('paving_n'), normalScale: nS(0.7) }), { streaks: 0 });
   const gravel = weathered(std({ color: new THREE.Color(1.22, 1.08, 0.88), map: T('gravel', true), normalMap: T('gravel_n'), normalScale: nS(0.5), roughness: 0.94 }), { streaks: 0 });
   const soil = std({ map: T('soil', true), roughness: 0.97 });
-  const foliage = std({ map: T('cypress', true), normalMap: T('cypress_n'), normalScale: nS(1.2), vertexColors: true, roughness: 0.86 });
+  const foliage = new THREE.MeshLambertMaterial({ map: T('cypress', true), normalMap: T('cypress_n'), normalScale: nS(1.0), vertexColors: true });   // matte: leaves don't mirror the sky
   const grass = [T('grass', true), T('grass_n')];
   const MATS = {
     'Vault: pierced shell (star holes)': [vault, 12, true], Bore: [boreStone, 12 / SCALE], 'Limestone ashlar': [ashlar, 15.6 / SCALE], 'Limestone dressed': [dressed, 12 / SCALE], 'Limestone sphere': [sphere, 12, true],
