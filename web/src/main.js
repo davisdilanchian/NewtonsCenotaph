@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { loadWorld, groundHeight, CENTER, SUN } from './world.js';
-import { makeSunshafts } from './sunshafts.js';
 import { Player, RADIUS, WALK, RUN } from './player.js';
 import { clamp, lerp, SCALE } from './util.js';
 
@@ -9,7 +8,7 @@ const debug = new URLSearchParams(location.search).has('debug');
 const touch = matchMedia('(pointer: coarse)').matches;
 if (touch) document.body.classList.add('touch');
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: debug });
+const renderer = new THREE.WebGLRenderer({ antialias: true, reversedDepthBuffer: true, powerPreference: 'high-performance', preserveDrawingBuffer: debug });
 renderer.setPixelRatio(Math.min(devicePixelRatio, touch ? 1.5 : 1.75));
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -29,18 +28,19 @@ addEventListener('resize', () => {
 });
 
 const fogDay = new THREE.Color(0xd3dbe3), fogVoid = new THREE.Color(0x05070a), FOG = 0.00045 * Math.sqrt(SCALE);
-const DAY = 360;                                // seconds for the sun to cross the sky
+const DAY = 2400;                               // seconds for the sun to cross the sky
 const metres = (v) => `${Math.round(v * SCALE)} m`;
 
 // Places, as feet position and what you face on arrival.
 const PLACES = [
   { name: 'The approach', note: `Reflecting basin, ${metres(730)} out`, at: [0, 0, 731], look: [0, 60, 0] },
   { name: 'The main stair', note: `${metres(42)} wide`, at: [0, 0, 172], look: [0, 40, 0] },
-  { name: 'The tunnel', note: 'Down through the arch, under the sphere', at: [0, 5.5, 60], look: [0, 3, 30] },
-  { name: 'Inside the sphere', note: 'Newton’s sarcophagus under the pierced vault', at: [5, 9.5, 5], look: [0, 12, -3] },
+  { name: 'The arch', note: `The way in: ${metres(104)} level to the sarcophagus`, at: [0, 5.5, 118], look: [0, 12, 0] },
+  { name: 'Inside the sphere', note: 'The sky at Newton’s birth, cut through the vault', at: [7, 14, 19], look: [0, 17, 0] },
   { name: 'The bridge', note: `${metres(46.5)} up, before the front stair block`, at: [-20, 46.5, 104], look: [0, 50, 0] },
   { name: 'The drum terrace', note: 'Four rows of cypress', at: [-66, 46.5, 64], look: [-94, 47, 0] },
   { name: 'The upper tier', note: `${metres(64)} up, against the sphere`, at: [-49, 64, 58.4], look: [40, 66, 70] },
+  { name: 'The long passage', note: `${metres(119)} from the east side to the sarcophagus`, at: [123, 5.5, 0], look: [0, 7, 0] },
 ];
 
 // Boullée's six sheets on the title screen.
@@ -79,17 +79,63 @@ function showSheets() {
     sheetTimer = setInterval(() => pick((current + 1) % SHEETS.length), 6000);
 }
 
-let world, player, shafts, dayClock = 0.3, shadowClock = 0;
+let world, player, dayClock = 0.2, shadowClock = 0;
 const keys = new Set();
 const input = { x: 0, y: 0, run: false, jump: false };
 const touchMove = { x: 0, y: 0 };
-const EYE = 1.63 / SCALE, EYE_VOID = 26, EYE_PASSAGE = 8;   // exposure once the eye has adapted
+const EYE = 1.63 / SCALE, EYE_VOID = 70, EYE_PASSAGE = 8;   // exposure once the eye has adapted
 let inside = 0, tunnel = 0, time = 0, stride = 0, bob = 0, lodAt = new THREE.Vector2(1e9, 1e9), lodClock = 0, started = false;
 
+
+// On a phone the screen is a window into the space: turn to look, and walk for real to move.
+// A web page can't track a phone's position, but it can feel each step and which way it faces.
+const gyro = { on: false, align: false, alpha: 0, beta: 0, gamma: 0, offset: 0 };
+const DEG = Math.PI / 180, tilt = new THREE.Euler(), held = new THREE.Quaternion(), roll = new THREE.Quaternion(), turn = new THREE.Quaternion(), facing = new THREE.Vector3();
+const flat = new THREE.Quaternion(-Math.SQRT1_2, 0, 0, Math.SQRT1_2), UP = new THREE.Vector3(0, 1, 0), OUT = new THREE.Vector3(0, 0, 1);
+const STRIDE = 1.1, STEP_TIME = 0.55;                // model units a step carries you, about 3 m, and how long it takes
+let stepping = 0;
+
+function startPhoneSensors() {
+  const listenTurn = () => addEventListener('deviceorientation', (e) => {
+    if (e.alpha === null) return;
+    Object.assign(gyro, { alpha: e.alpha, beta: e.beta, gamma: e.gamma });
+    if (!gyro.on) { gyro.on = gyro.align = true; $('phone').classList.add('on'); setTimeout(() => $('phone').classList.remove('on'), 7000); }
+  });
+  const listenSteps = () => {
+    let level = 9.8, armed = true, last = 0;
+    addEventListener('devicemotion', (e) => {
+      const a = e.accelerationIncludingGravity;
+      if (!a || a.x === null) return;
+      const size = Math.hypot(a.x, a.y, a.z), rise = size - level, now = performance.now();
+      level += (size - level) * 0.05;
+      if (armed && rise > 1.3 && now - last > 320) { stepping = STEP_TIME; last = now; armed = false; } else if (rise < 0.3) armed = true;
+    });
+  };
+  const askTurn = window.DeviceOrientationEvent?.requestPermission, askSteps = window.DeviceMotionEvent?.requestPermission;   // iPhones ask first, and only from a tap
+  if (askTurn) askTurn.call(DeviceOrientationEvent).then((state) => { if (state === 'granted') listenTurn(); }).catch(() => {}); else listenTurn();
+  if (askSteps) askSteps.call(DeviceMotionEvent).then((state) => { if (state === 'granted') listenSteps(); }).catch(() => {}); else listenSteps();
+  setTimeout(() => { if (!gyro.on) document.body.classList.add('no-sensors'); }, 2500);   // no sensors: fall back to the on-screen stick
+}
+
+function gyroView() {
+  const screenAngle = (screen.orientation?.angle ?? window.orientation ?? 0) * DEG;
+  tilt.set(gyro.beta * DEG, gyro.alpha * DEG, -gyro.gamma * DEG, 'YXZ');
+  held.setFromEuler(tilt).multiply(flat).multiply(roll.setFromAxisAngle(OUT, -screenAngle));
+  if (gyro.align) {                                  // keep looking where the arrival faces, however the phone is held
+    facing.set(0, 0, -1).applyQuaternion(held);
+    gyro.offset = player.yaw - Math.atan2(-facing.x, -facing.z);
+    gyro.align = false;
+  }
+  camera.quaternion.copy(turn.setFromAxisAngle(UP, gyro.offset)).multiply(held);
+  facing.set(0, 0, -1).applyQuaternion(camera.quaternion);
+  player.yaw = Math.atan2(-facing.x, -facing.z);     // you walk the way the phone faces
+  player.pitch = Math.asin(clamp(facing.y, -1, 1));
+}
 
 function arrive(p) {
   player.place({ x: p.at[0], y: p.at[1], z: p.at[2] }, { x: p.look[0], z: p.look[2] });
   player.pitch = 0.16;
+  gyro.align = true;
   show(p);
 }
 
@@ -102,8 +148,8 @@ function show(p) { $('whereName').textContent = p.name; $('whereNote').textConte
 
 // in the passages: below the terrace, or on the ramp up through the shell
 function underground() {
-  const r = Math.hypot(player.pos.x, player.pos.z), feet = player.feet;
-  return (feet < 4.6 && r < 156 && !(Math.abs(player.pos.x) < 22 && player.pos.z > 137)) || (r < 30 && feet < 9.3 && Math.abs(player.pos.x) < 3 && player.pos.z > 4);
+  const { x, z } = player.pos, r = Math.hypot(x, z);
+  return player.feet < 13.9 && (Math.abs(x) < 7.2 && z > 0 && z < 105 || Math.abs(z) < 3.5 && r < 119);
 }
 
 function placeLabel(feet) {
@@ -118,6 +164,7 @@ function placeLabel(feet) {
 }
 
 function look(dx, dy) {
+  if (gyro.on) { gyro.offset -= dx * 0.0022; return; }
   player.yaw -= dx * 0.0022;
   player.pitch = clamp(player.pitch - dy * 0.0022, -1.5, 1.5);
 }
@@ -137,7 +184,7 @@ function updateCamera(dt) {
     p.x + Math.cos(player.yaw) * Math.cos(bob) * 0.012 / SCALE * stride,
     p.y - RADIUS + EYE + Math.abs(Math.sin(bob)) * 0.04 / SCALE * stride - player.dip,
     p.z - Math.sin(player.yaw) * Math.cos(bob) * 0.012 / SCALE * stride);
-  camera.rotation.set(player.pitch, player.yaw, 0, 'YXZ');
+  if (gyro.on) gyroView(); else camera.rotation.set(player.pitch, player.yaw, 0, 'YXZ');
   const fov = FOV + clamp((player.speed - WALK * 2) / (RUN - WALK * 2), 0, 1) * 4.8;
   if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = lerp(camera.fov, fov, Math.min(1, dt * 6)); camera.updateProjectionMatrix(); }
 }
@@ -162,6 +209,7 @@ function frame() {
 
 function simulate(dt) {
   readInput();
+  if (stepping > 0) { stepping -= dt; input.y = 1; input.speed = STRIDE / STEP_TIME; } else input.speed = undefined;
   player.update(dt, input);
 }
 
@@ -176,7 +224,7 @@ function tick(dt) {
   inside = lerp(inside, isIn ? 1 : 0, Math.min(1, dt * 1.6));
   tunnel = lerp(tunnel, below ? 1 : 0, Math.min(1, dt * 2.5));
   // the sun crosses the sky and back; holding T hurries it along
-  dayClock += dt * (keys.has('KeyT') ? 40 : 1) / DAY;
+  dayClock += dt * (keys.has('KeyT') ? 120 : 1) / DAY;
   const leg = dayClock % 2;
   world.setSun(leg < 1 ? leg : 2 - leg);
 
@@ -185,9 +233,15 @@ function tick(dt) {
   renderer.toneMappingExposure = lerp(0.72, lerp(EYE_VOID, EYE_PASSAGE, tunnel), inside);
   world.scene.fog.density = lerp(FOG, 0.0006, inside);
   world.scene.fog.color.lerpColors(fogDay, fogVoid, inside);
-  world.shadowsClose(inside > 0.4);
+  const inVoid = p.distanceTo(CENTER) < 66.5;
+  world.shadowsClose(inVoid);
+  world.shafts.mesh.visible = inVoid;
   shadowClock -= dt;
-  if (shadowClock <= 0 || keys.has('KeyT')) { shadowClock = inside > 0.4 ? 0.2 : 1.5; world.refresh(); }
+  if (shadowClock <= 0 || keys.has('KeyT')) {
+    shadowClock = inVoid ? 1.5 : 20;
+    world.refresh();
+    if (inVoid) world.shafts.update(SUN, world.sun);
+  }
 
   world.water.material.uniforms.time.value = time;
   world.lamps.material.uniforms.t.value = time;
@@ -203,7 +257,6 @@ function tick(dt) {
   const label = placeLabel(player.feet);
   if ($('whereName').textContent !== label.name) show(label);
   renderer.render(world.scene, camera);
-  if (inside > 0.02 && camera.position.distanceTo(CENTER) < 72) shafts.render(camera);
   adapt(dt);
 }
 
@@ -268,7 +321,6 @@ function bindControls() {
 async function start() {
   world = await loadWorld(renderer, (f) => { $('bar').firstElementChild.style.width = `${Math.round(f * 100)}%`; });
   player = new Player({ bvh: world.bvh, groundHeight, treeHash: world.trees.hash });
-  shafts = makeSunshafts(renderer, world.sun, SUN);
   bindControls();
 
   $('about').textContent = `Published accounts put the sphere at 150 m. This reconstruction, judged by eye from the people and cypresses in his drawings, stands it ${metres(150)} wide, with all 2,139 cypresses.`;
@@ -279,7 +331,7 @@ async function start() {
   renderer.compile(world.scene, camera);
   updateCamera(0.016);
   renderer.render(world.scene, camera);
-  if (debug) window.walk = { player, keys, input, world, camera, teleport, renderer, fps: 0, PLACES, simulate, tick, look };
+  if (debug) window.walk = { player, keys, input, world, camera, teleport, renderer, fps: 0, PLACES, simulate, tick, look, gyro, step: () => { stepping = STEP_TIME; } };
   frame();
 
   $('bar').style.display = 'none';
@@ -291,7 +343,8 @@ async function start() {
     $('intro').classList.add('gone');
     $('hud').classList.add('on');
     started = true;
-    if (!touch) canvas.requestPointerLock?.()?.catch?.(() => {});
+    if (touch) startPhoneSensors();
+    else canvas.requestPointerLock?.()?.catch?.(() => {});
   });
 }
 

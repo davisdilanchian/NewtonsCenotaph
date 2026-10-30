@@ -1,88 +1,68 @@
-// Sunlight in the air of the void. Each pixel's ray is marched through the sphere and tested
-// against the sun's shadow map, so a shaft exists only where the sun really passes a bore.
+// Sunlight in the air of the void. For the sun's present direction each bore is tested as the real
+// tapering hole it is, and the light that gets through is drawn as a cylinder whose brightness at
+// each pixel is the exact length of the view ray inside it. No sampling, so no noise.
 import * as THREE from 'three';
 
-const STEPS = 44;
+const MAX = 220, C = new THREE.Vector3(0, 73.5, 0), R = 67, SHELL = 8;
 
-export function makeSunshafts(renderer, sun, sunDir) {
-  const target = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, depthBuffer: false });
-  const screen = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  const plane = new THREE.PlaneGeometry(2, 2);
-  const vertexShader = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
+export function makeSunshafts(holeBuffer, eye) {
+  const n = new Uint32Array(holeBuffer, 0, 1)[0], data = new Float32Array(holeBuffer, 4, n * 4);
+  const bores = [];
+  for (let i = 0; i < n; i++) {
+    const d = new THREE.Vector3().fromArray(data, i * 4), r = data[i * 4 + 3];
+    const inner = d.clone().multiplyScalar(R).add(C), axis = inner.clone().sub(eye).normalize();
+    const length = SHELL / Math.max(0.3, axis.dot(d));
+    bores.push({ inner, axis, length, inR: r * 2.2, outR: Math.max(r * (2.2 - 0.164 * length), 0.02), outer: inner.clone().addScaledVector(axis, length) });
+  }
 
-  const march = new THREE.ShaderMaterial({
-    depthTest: false, depthWrite: false,
-    uniforms: {
-      tShadow: { value: null }, shadowMatrix: { value: new THREE.Matrix4() }, frame: { value: 0 },
-      camPos: { value: new THREE.Vector3() }, invProj: { value: new THREE.Matrix4() }, camWorld: { value: new THREE.Matrix4() },
-      sun: { value: sunDir }, tint: { value: new THREE.Color() },
-    },
-    vertexShader,
-    fragmentShader: `precision highp float; precision highp sampler2DShadow;
-      uniform sampler2DShadow tShadow; uniform mat4 shadowMatrix, invProj, camWorld; uniform vec3 camPos, sun, tint; uniform float frame;
-      varying vec2 vUv;
-      const vec3 C = vec3(0.0, 73.5, 0.0);
-      void main(){
-        vec4 v = invProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
-        vec3 dir = normalize((camWorld * vec4(v.xyz / v.w, 0.0)).xyz);
-        vec3 oc = camPos - C; float b = dot(oc, dir), c = dot(oc, oc) - 67.0 * 67.0, h = b * b - c;
-        float end = h > 0.0 ? -b + sqrt(h) : 0.0;
-        if (dir.y < 0.0) end = min(end, (9.5 - camPos.y) / dir.y);
-        if (end <= 0.0) { gl_FragColor = vec4(0.0); return; }
-        float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy + 5.588 * frame, vec2(0.06711056, 0.00583715))));
-        float seen = 0.0, step = end / float(${STEPS});
-        for (int i = 0; i < ${STEPS}; i++) {
-          vec3 p = camPos + dir * (float(i) + noise) * step;
-          vec4 s = shadowMatrix * vec4(p, 1.0);
-          seen += texture(tShadow, vec3(s.xy / s.w, s.z / s.w - 0.00004));
-        }
-        float g = 0.55, mu = dot(dir, sun), phase = (1.0 - g * g) / (12.566 * pow(1.0 + g * g - 2.0 * g * mu, 1.5));
-        gl_FragColor = vec4(tint * seen * step * phase * 0.016, 1.0);
-      }`,
-  });
-  const marchScene = new THREE.Scene();
-  const marchQuad = new THREE.Mesh(plane, march); marchQuad.frustumCulled = false;
-  marchScene.add(marchQuad);
-
-  const add = new THREE.ShaderMaterial({
-    depthTest: false, depthWrite: false, transparent: true, blending: THREE.AdditiveBlending,
-    uniforms: { tLight: { value: target.texture }, texel: { value: new THREE.Vector2() } },
-    vertexShader,
-    fragmentShader: `uniform sampler2D tLight; uniform vec2 texel; varying vec2 vUv;
-      void main(){ vec3 c = vec3(0.0); float w = 0.0;       // a small blur takes out the march's jitter
-        for (int x = -2; x <= 2; x++) for (int y = -2; y <= 2; y++) { float k = 1.0 / (1.0 + float(x * x + y * y)); c += texture2D(tLight, vUv + vec2(x, y) * texel).rgb * k; w += k; }
-        gl_FragColor = vec4(c / w, 1.0);
+  const geo = new THREE.InstancedBufferGeometry();
+  geo.copy(new THREE.CylinderGeometry(1, 1, 1, 10, 1, true).translate(0, 0.5, 0));
+  geo.instanceCount = 0;
+  const attr = (name, size) => { const a = new THREE.InstancedBufferAttribute(new Float32Array(MAX * size), size); a.setUsage(THREE.DynamicDrawUsage); geo.setAttribute(name, a); return a; };
+  const from = attr('from', 3), to = attr('to', 3), shape = attr('shape', 2);
+  const material = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.BackSide,
+    uniforms: { sun: { value: new THREE.Vector3() }, tint: { value: new THREE.Color() } },
+    vertexShader: `attribute vec3 from, to; attribute vec2 shape; varying vec3 vWorld, vA, vB; varying vec2 vShape;
+      void main(){ vec3 axis = normalize(to - from), u = normalize(cross(axis, vec3(0.31, 0.17, 0.93))), v = cross(axis, u);
+        vec3 p = mix(from, to, position.y) + (u * position.x + v * position.z) * shape.x * 1.15;
+        vWorld = p; vA = from; vB = to; vShape = shape; gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0); }`,
+    fragmentShader: `uniform vec3 sun, tint; varying vec3 vWorld, vA, vB; varying vec2 vShape;
+      void main(){ vec3 d = normalize(vWorld - cameraPosition), ax = normalize(vB - vA), oc = cameraPosition - vA;
+        float da = dot(d, ax), oa = dot(oc, ax), a = max(1.0 - da * da, 0.0001), b = dot(d, oc) - da * oa, c = dot(oc, oc) - oa * oa - vShape.x * vShape.x, h = b * b - a * c;
+        if (h <= 0.0) discard;
+        float chord = 2.0 * sqrt(h) / a, g = 0.5, mu = dot(d, sun), phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * mu, 1.5);
+        gl_FragColor = vec4(tint * chord * phase * vShape.y * 0.0065, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`,
   });
-  const addScene = new THREE.Scene();
-  const addQuad = new THREE.Mesh(plane, add); addQuad.frustumCulled = false;
-  addScene.add(addQuad);
+  const mesh = new THREE.Mesh(geo, material);
+  mesh.frustumCulled = false;
 
-  let frame = 0;
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), toward = new THREE.Vector3();
   return {
-    render(camera) {
-      const map = sun.shadow.map;
-      if (!map?.depthTexture) return;
-      const size = renderer.getDrawingBufferSize(new THREE.Vector2()), w = Math.ceil(size.x / 2), h = Math.ceil(size.y / 2);
-      if (target.width !== w || target.height !== h) target.setSize(w, h);
-      const u = march.uniforms;
-      u.tShadow.value = map.depthTexture;
-      u.shadowMatrix.value.copy(sun.shadow.matrix);
-      u.camPos.value.setFromMatrixPosition(camera.matrixWorld);
-      u.invProj.value.copy(camera.projectionMatrixInverse);
-      u.camWorld.value.copy(camera.matrixWorld);
-      u.tint.value.copy(sun.color).multiplyScalar(sun.intensity);
-      u.frame.value = frame = (frame + 1) % 64;
-      add.uniforms.texel.value.set(1 / w, 1 / h);
-      renderer.setRenderTarget(target);
-      renderer.render(marchScene, screen);
-      renderer.setRenderTarget(null);
-      const auto = renderer.autoClear;
-      renderer.autoClear = false;
-      renderer.render(addScene, screen);
-      renderer.autoClear = auto;
+    mesh,
+    update(sun, light) {
+      let count = 0;
+      for (const bore of bores) {
+        const cos = bore.axis.dot(sun);
+        if (cos < 0.9) continue;
+        const shift = bore.length * Math.sqrt(1 - cos * cos) / cos, open = (bore.inR + bore.outR - shift) / (2 * bore.outR);
+        if (open <= 0 || count >= MAX) continue;
+        a.copy(bore.outer).addScaledVector(sun, -bore.length / cos);
+        const reach = 2 * toward.subVectors(a, C).dot(sun);
+        b.copy(a).addScaledVector(sun, -Math.max(reach, 1));
+        if (b.y < 14) b.lerpVectors(a, b, (a.y - 14) / (a.y - b.y));
+        from.setXYZ(count, a.x, a.y, a.z); to.setXYZ(count, b.x, b.y, b.z);
+        shape.setXY(count, bore.outR, Math.min(open, 1));
+        count++;
+      }
+      geo.instanceCount = count;
+      from.needsUpdate = to.needsUpdate = shape.needsUpdate = true;
+      material.uniforms.sun.value.copy(sun);
+      material.uniforms.tint.value.copy(light.color).multiplyScalar(light.intensity);
+      return count;
     },
   };
 }

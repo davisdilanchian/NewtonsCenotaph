@@ -31,7 +31,7 @@ export class Player {
 
   update(dt, input) {
     const fwd = input.y, side = input.x, len = Math.hypot(fwd, side);
-    const target = (input.run ? RUN : WALK) * Math.min(1, len);
+    const target = (input.speed ?? (input.run ? RUN : WALK)) * Math.min(1, len);
     const nx = len ? side / Math.max(1, len) : 0, nz = len ? fwd / Math.max(1, len) : 0;
     const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
     const dirX = -sin * nz + cos * nx, dirZ = -cos * nz - sin * nx;

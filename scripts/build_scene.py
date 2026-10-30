@@ -27,12 +27,13 @@ D = dict(
     tier_R=82.0, tier_wall_top=62.6, tier_cornice_R=83.2, tier_top=64.0,
     stair_half_w=21.0, stair_inner_y=-139.0, stair_rise=0.06, stair_steps=92,
     tunnel_half_w=7.0, tunnel_spring=6.5,      # the arch at the sphere's foot, now a sealed door
-    passage_half_w=2.2, passage_h=3.9, passage_z=0.06,   # section: 3.9 high, at terrace depth
-    floor_top=9.5,                              # the flat floor round the sarcophagus
+    passage_half_w=2.2, passage_h=3.9, passage_z=5.52,   # section: 3.9 high, level with the terrace
+    floor_top=14.0, mound_top=17.0,             # the raised floor, and the mound the sarcophagus stands on
     people_scale=3.0,                           # figures drawn this much smaller, so the site reads 450 m
     v_bottom_half=39.5, v_top_half=10.3,        # front stair block: half-widths, base and top
     stair_block_y=-87.0, stair_block_back=-70.0,  # its front face, and its back, buried in the shell
     cone_r_back=72.0, cone_r_front=80.0,        # drum front cut (cone on Y axis)
+    core_R=104.0,                               # the plain cylinder the cut exposes: the sphere never shows below the bridge
     tree_spacing_note="about 3 m along each row, rows paired and staggered",
 )
 # Ten rows of cypress, measured from the plan (radius m, angular pitch rad,
@@ -145,54 +146,45 @@ def passage(points, step=3.5):
     return bm
 
 def passages():
-    """The front arch and two doors in the terrace wall beside the main stair, all meeting under the
-    sphere, then Boullée's ramp up through the floor to the sarcophagus. The section's slope is about 23°."""
-    z, w, h = D["passage_z"], D["passage_half_w"], D["passage_h"]
-    tw, top = D["tunnel_half_w"], D["tunnel_spring"] + D["tunnel_half_w"] - D["platform_top"]
-    door_x, door_y = 30.0, -math.sqrt(D["platform_R"] ** 2 - 30.0 ** 2)
-    end = (0.0, -34.0)
-    legs = []
-    for s in (-1, 1):
-        run = Vector((end[0] - s * door_x, end[1] - door_y)).normalized()
-        legs.append([(s * door_x - run.x * 3, door_y - run.y * 3, z, w, h), (end[0] + run.x * 2, end[1] + run.y * 2, z, w, h)])
-    # the roof stays at the arch's height until the passage is inside the sphere's face
-    legs.append([(0, -52.0, D["platform_top"] + 0.02, tw, top), (0, -46.0, D["platform_top"] - 0.02, tw, top),
-                 (0, -31.0, 1.2, tw, top + D["platform_top"] - 1.2 - 0.2), (0, -27.0, z, w, h), (0, -26.2, z, w, h)])
-    legs.append([(0, -38.0, z, w, h), (0, -26.0, z, w, h), (0, -5.0, D["floor_top"], w, h)])
+    """The arch in the elevation, in the face of the core and opening on a porch, and level passages from the east and west
+    sides of the drum, as in the section. Each rises at about 25° under the floor and comes up
+    below the sarcophagus."""
+    z, w, h, ft = D["passage_z"], D["passage_half_w"], D["passage_h"], D["floor_top"]
+    tw, top = D["tunnel_half_w"], D["tunnel_spring"] + D["tunnel_half_w"] - z
+    legs = [[(0, -110.0, z, tw, top), (0, -96.0, z, tw, top), (0, -95.8, z, w, h), (0, -29.0, z, w, h), (0, -11.0, ft, w, h)]]
+    for ax, ay in ((1, 0), (-1, 0)):
+        at = lambda r: (ax * r, ay * r)
+        legs.append([(*at(123.0), z, w + 1.2, h + 1.7), (*at(116.0), z, w, h), (*at(33.0), z, w, h), (*at(11.0), ft, w, h)])
     return legs
 
 def passage_lamps():
     """Oil lamps on the passage walls, every 12 units, alternating sides."""
     lamps = []
     for leg in passages():
-        a, b = Vector(leg[0][:3]), Vector(leg[-1][:3])
-        run = (b - a); n = int(run.length / 12)
-        side = Vector((-run.y, run.x, 0)).normalized()
-        for k in range(1, n):
-            p = a + run * (k / n)
-            if p.length > 158:
+        for p0, p1 in zip(leg, leg[1:]):
+            a, b = Vector(p0[:3]), Vector(p1[:3])
+            run = b - a
+            n = int(run.length / 12)
+            if p0[3] != D["passage_half_w"] or n < 1:
                 continue
-            lamps.append(tuple(p + side * (1.85 if k % 2 else -1.85) + Vector((0, 0, 2.5))))
+            side = Vector((-run.y, run.x, 0)).normalized()
+            for k in range(n):
+                q = a + run * ((k + 0.5) / n)
+                lamps.append(tuple(q + side * (1.9 if k % 2 else -1.9) + Vector((0, 0, 2.5))))
     return lamps
 
 def star_holes():
-    """The vault's openings as (direction, inner radius). Only where the shell stands clear of the
-    upper tier does daylight reach them."""
-    rnd = random.Random(1784)
-    band = Vector((0.35, 0.55, 0.76)).normalized()
-    moon = Vector((-0.45, 0.35, 0.82)).normalized()
-    holes, tries = [(moon, 1.9)], 0
-    while len(holes) < 2200 and tries < 400000:
-        tries += 1
-        v = Vector((rnd.uniform(-1, 1), rnd.uniform(-1, 1), rnd.uniform(-1, 1)))
-        if not 0.01 < v.length_squared < 1:
-            continue
-        v.normalize()
-        in_band = abs(v.dot(band)) < 0.11
-        if v.z < -0.08 or rnd.random() > (1.0 if in_band else 0.22):
-            continue
-        r = 0.18 + 0.36 * rnd.random() ** 4
-        if all(v.dot(d) < math.cos((2.3 * (r + q) + 0.3) / 67.0) for d, q in holes):
+    """The vault's openings: the sky over Woolsthorpe at Newton's birth (docs/birth_sky.json), each
+    star at its true place as seen from the middle of the sphere, its opening sized by brightness.
+    South lies over the front of the monument."""
+    sky = json.load(open(os.path.join(ROOT, "docs", "birth_sky.json")))
+    moon = next(b for b in sky["bodies"] if b["name"] == "Moon")
+    holes = [(Vector(moon["d"]).normalized(), 1.9)]
+    up = [{"d": b["d"], "mag": b["mag"]} for b in sky["bodies"] if b["name"] != "Moon" and b["alt"] > 2]
+    for st in sorted(sky["stars"] + up, key=lambda x: x["mag"]):
+        v = Vector(st["d"]).normalized()
+        r = max(0.075, min(0.6, 0.5 * 10 ** (-0.13 * st["mag"])))
+        if all(v.dot(d) < math.cos((2.35 * (r + q) + 0.1) / 67.0) for d, q in holes):
             holes.append((v, r))
     return holes
 
@@ -205,7 +197,7 @@ def hole_cutter():
         q = Vector((0, 0, D["sphere_cz"])) + d * D["shell_inner_R"]
         axis = (q - eye).normalized()
         m = Matrix.Translation(q + axis * 6.0) @ Vector((0, 0, 1)).rotation_difference(axis).to_matrix().to_4x4()
-        bmesh.ops.create_cone(bm, cap_ends=True, segments=10, radius1=r * 2.35, radius2=r * 0.3, depth=14.0, matrix=m)
+        bmesh.ops.create_cone(bm, cap_ends=True, segments=12, radius1=r * 2.35, radius2=r * 0.05, depth=14.0, matrix=m)
     return bm
 
 def uv_sphere(R, cz, seg=256, rings=128, bm=None):
@@ -577,9 +569,6 @@ def build():
     recess = temp_obj("cut_recess", box(-sh, sh, -175, D["stair_inner_y"], -1, 7))
     boolean(plat, recess); kill(recess)
     boolean(plat, sph71)
-    cutters = [temp_obj(f"cut_passage{i}", passage(leg)) for i, leg in enumerate(passages())]
-    for c_ in cutters:
-        boolean(plat, c_)
     # assign paving to top faces
     for p in plat.data.polygons:
         if p.normal.z > 0.9: p.material_index = 1
@@ -600,7 +589,20 @@ def build():
     # --- drum -------------------------------------------------------------
     drum = mesh_obj("Drum (main cylinder)", annulus(0, D["drum_R"], D["platform_top"] - 0.5, D["drum_wall_top"]), C_MON, M["ashlar"])
     boolean(drum, sph71)
-    boolean(drum, cone)
+    # the front cut only peels back the drum's outer skin, down to a plain cylindrical core
+    core = temp_obj("keep_core", annulus(0, D["core_R"], -5, 60, 360))
+    boolean(cone, core, solver="MANIFOLD"); kill(core)
+    boolean(drum, cone, solver="MANIFOLD")
+    drum.data.materials.append(M["dressed"])
+    i_core = len(drum.data.materials) - 1
+    for p in drum.data.polygons:
+        if p.center.y < 0 and abs(math.hypot(p.center.x, p.center.y) - D["core_R"]) < 0.5:
+            p.material_index = i_core
+    clear = temp_obj("cut_clear", uv_sphere(R - 0.05, CZ, 192, 96))     # no overlap with the shell, or a passage cut through both doubles its walls
+    boolean(drum, clear); kill(clear)
+    cutters = [temp_obj(f"cut_passage{i}", passage(leg)) for i, leg in enumerate(passages())]
+    for c_ in cutters:
+        boolean(drum, c_, solver="MANIFOLD")
     # frieze + dentil core + corona (continuous: the 'bridge' across the front opening)
     fr = mesh_obj("Drum frieze", annulus(60, D["drum_frieze_R"], D["drum_wall_top"], 45.4), C_MON, M["dressed"])
     boolean(fr, sph71)
@@ -638,8 +640,14 @@ def build():
     for k in range(nsteps):
         zb = D["drum_top"] + k * rise
         half = vb - slope * (zb + rise - D["drum_top"])
-        box(-half, half, D["stair_block_y"], D["stair_block_back"], zb, zb + rise, vs)
-    mesh_obj("Front stair block", vs, C_MON, M["paving"])
+        box(-half, half, D["stair_block_y"], D["stair_block_back"], zb, min(zb + rise, D["tier_top"] - 0.02), vs)   # just below the tier's top, or the two surfaces fight
+    # plain dressed face, as drawn, with a thin stringer inside each flight
+    for k in range(0, nsteps, 3):
+        zb = D["drum_top"] + k * rise
+        half = vb - slope * (zb + rise - D["drum_top"])
+        for s_ in (-1, 1):
+            box(s_ * (half - 3.0) - 0.38, s_ * (half - 3.0) + 0.38, D["stair_block_y"] - 0.14, D["stair_block_y"] + 0.02, zb, zb + rise * 3, vs)
+    mesh_obj("Front stair block", vs, C_MON, M["dressed"])
 
     # --- sphere shell ---------------------------------------------------------
     sphere = mesh_obj("Sphere (Ø150 m shell)", uv_sphere(R, CZ, 384, 192), C_MON, M["sphere"])
@@ -666,20 +674,25 @@ def build():
     sphere.data.shade_smooth()
     # one flat floor, as in the section, with the ramp from the passages cut up through it
     floor_z = CZ - D["shell_inner_R"]
-    plain = mesh_obj("Interior floor", annulus(0, 26, floor_z - 3, D["floor_top"], 128), C_MON, M["paving"])
-    boolean(plain, cutters[-1])
+    plain = mesh_obj("Interior floor", annulus(0, 31, floor_z - 3, D["floor_top"], 128), C_MON, M["paving"])
+    void = temp_obj("keep_void", uv_sphere(D["shell_inner_R"] + 0.05, CZ, 192, 96))
+    boolean(plain, void, op="INTERSECT"); kill(void)                     # likewise: the floor stops at the shell
     for c_ in cutters:
+        boolean(plain, c_, solver="MANIFOLD")
         kill(c_)
-    sz = D["floor_top"]
-    sar = box(-1.4, 1.4, -2.6, 2.6, sz, sz + 0.5)
-    box(-1.15, 1.15, -2.35, 2.35, sz + 0.5, sz + 1.8, sar)
-    box(-1.35, 1.35, -2.55, 2.55, sz + 1.8, sz + 2.2, sar)
+    mb = bmesh.new()
+    bmesh.ops.create_cone(mb, cap_ends=True, segments=96, radius1=11.0, radius2=5.0, depth=D["mound_top"] - D["floor_top"] + 0.1,
+                          matrix=Matrix.Translation((0, 0, (D["floor_top"] + D["mound_top"] - 0.1) / 2)))
+    mesh_obj("Sarcophagus mound", mb, C_MON, M["dressed"])
+    sz = D["mound_top"]
+    sar = sarcophagus(sz)
     mesh_obj("Sarcophagus of Newton", sar, C_MON, M["dressed"])
+    inscription(C_MON, M)
 
     # bridge portal (small doorway on the drum terrace at the sphere)
     pz, py = D["drum_top"], D["stair_block_y"]
     por = box(-3.2, 3.2, py - 0.8, py + 0.2, pz, pz + 6.4)
-    box(-3.8, 3.8, py - 1.2, py + 0.2, pz + 6.4, pz + 7.2, por)
+    box(-3.8, 3.8, py - 1.2, py + 0.2, pz + 6.4, pz + 7.23, por)
     mesh_obj("Bridge portal", por, C_MON, M["dressed"])
     mesh_obj("Bridge portal door", box(-1.6, 1.6, py - 0.86, py - 0.7, pz, pz + 4.6), C_MON, M["dark"])
 
@@ -1058,6 +1071,80 @@ def lion_mesh(name="lion"):
     out.name = name
     return out
 
+def inscription(c, M):
+    """Three lines in the core's face below the bridge, where the elevation shows them, wrapped
+    round the cylinder. The last words echo Newton's epitaph in Westminster Abbey."""
+    path = "/System/Library/Fonts/Supplemental/Times New Roman.ttf"
+    font = bpy.data.fonts.load(path) if os.path.exists(path) else None
+    r = D["core_R"]
+    bm = bmesh.new()
+    for text, size, z in (("ISAACO NEWTONO", 2.3, 37.6), ("QVI NATVRAE LEGES PATEFECIT", 1.55, 35.1), ("HVMANI GENERIS DECVS", 1.55, 32.9)):
+        cu = bpy.data.curves.new("line", "FONT")
+        cu.body = text; cu.size = size; cu.align_x = "CENTER"; cu.extrude = 0.025; cu.resolution_u = 4; cu.space_character = 1.14
+        if font:
+            cu.font = font
+        ob = bpy.data.objects.new("line", cu); bpy.context.collection.objects.link(ob)
+        dg = bpy.context.evaluated_depsgraph_get(); dg.update()
+        me = bpy.data.meshes.new_from_object(ob.evaluated_get(dg))
+        bpy.data.objects.remove(ob); bpy.data.curves.remove(cu)
+        for v in me.vertices:
+            a = v.co.x / r
+            v.co = ((r + 0.03 + v.co.z) * math.sin(a), -(r + 0.03 + v.co.z) * math.cos(a), z + v.co.y)
+        bm.from_mesh(me); bpy.data.meshes.remove(me)
+    mesh_obj("Inscription", bm, c, M["dark"])
+
+def sarcophagus(z):
+    """A classical tomb after the section: stepped plinth, panelled body with pilasters, dentilled
+    cornice and a pedimented lid with acroteria, its long face to the front."""
+    bm = bmesh.new()
+    L, W = 3.2, 1.75                                   # half length and half width of the body
+    box(-L - 0.75, L + 0.75, -W - 0.75, W + 0.75, z, z + 0.28, bm)
+    box(-L - 0.5, L + 0.5, -W - 0.5, W + 0.5, z + 0.28, z + 0.52, bm)
+    box(-L - 0.28, L + 0.28, -W - 0.28, W + 0.28, z + 0.52, z + 0.72, bm)
+    box(-L - 0.12, L + 0.12, -W - 0.12, W + 0.12, z + 0.72, z + 0.86, bm)
+    top = z + 2.9
+    box(-L, L, -W, W, z + 0.86, top, bm)
+    for sy in (-1, 1):                                 # long faces: pilasters and recessed panels
+        y = sy * W
+        xs = [-L + 0.22, -L * 0.34, L * 0.34, L - 0.22]
+        for x in xs:
+            box(x - 0.2, x + 0.2, min(y, y + sy * 0.12), max(y, y + sy * 0.12), z + 0.86, top - 0.2, bm)
+            box(x - 0.27, x + 0.27, min(y, y + sy * 0.18), max(y, y + sy * 0.18), z + 0.86, z + 1.02, bm)
+            box(x - 0.27, x + 0.27, min(y, y + sy * 0.18), max(y, y + sy * 0.18), top - 0.34, top - 0.2, bm)
+        for x0, x1 in zip(xs, xs[1:]):
+            a_, b_ = x0 + 0.34, x1 - 0.34
+            for u0, u1, v0, v1 in ((a_, b_, z + 1.18, z + 1.26), (a_, b_, top - 0.54, top - 0.46), (a_, a_ + 0.08, z + 1.18, top - 0.46), (b_ - 0.08, b_, z + 1.18, top - 0.46)):
+                box(u0, u1, min(y, y + sy * 0.06), max(y, y + sy * 0.06), v0, v1, bm)
+        for k in range(23):                            # a garland across the middle panel
+            t = k / 22
+            x = -L * 0.3 + t * L * 0.6
+            q = top - 0.7 - 0.62 * (1 - (2 * t - 1) ** 2)
+            bmesh.ops.create_icosphere(bm, subdivisions=1, radius=0.1, matrix=Matrix.Translation((x, y + sy * 0.1, q)))
+        for x in (-L * 0.3, L * 0.3):                  # rosettes holding it
+            bmesh.ops.create_icosphere(bm, subdivisions=2, radius=0.17, matrix=Matrix.Translation((x, y + sy * 0.13, top - 0.68)))
+    for sx in (-1, 1):                                 # end faces
+        for y in (-W + 0.22, W - 0.22):
+            box(min(sx * L, sx * (L + 0.12)), max(sx * L, sx * (L + 0.12)), y - 0.2, y + 0.2, z + 0.86, top - 0.2, bm)
+    box(-L - 0.14, L + 0.14, -W - 0.14, W + 0.14, top - 0.2, top, bm)
+    box(-L - 0.3, L + 0.3, -W - 0.3, W + 0.3, top, top + 0.16, bm)
+    n = 46
+    for k in range(n + 1):                             # dentils
+        x = -L - 0.3 + 2 * (L + 0.3) * k / n
+        for y0, y1 in ((-W - 0.42, -W - 0.3), (W + 0.3, W + 0.42)):
+            box(x - 0.05, x + 0.05, y0, y1, top + 0.03, top + 0.15, bm)
+    box(-L - 0.5, L + 0.5, -W - 0.5, W + 0.5, top + 0.16, top + 0.34, bm)
+    t0 = top + 0.34
+    lid = prism_y([(-L - 0.5, t0), (L + 0.5, t0), (0, t0 + 1.05)], -W - 0.5, W + 0.5)
+    tmp = bpy.data.meshes.new("t"); lid.to_mesh(tmp); lid.free(); bm.from_mesh(tmp); bpy.data.meshes.remove(tmp)
+    for sy in (-1, 1):                                 # raking cornice and a rosette in the pediment
+        rake = prism_y([(-L - 0.62, t0 - 0.02), (L + 0.62, t0 - 0.02), (0, t0 + 1.2)], min(sy * (W + 0.5), sy * (W + 0.62)), max(sy * (W + 0.5), sy * (W + 0.62)))
+        tmp = bpy.data.meshes.new("t"); rake.to_mesh(tmp); rake.free(); bm.from_mesh(tmp); bpy.data.meshes.remove(tmp)
+        bmesh.ops.create_icosphere(bm, subdivisions=2, radius=0.26, matrix=Matrix.Translation((0, sy * (W + 0.66), t0 + 0.42)))
+    for x, y, h, s in [(0, 0, t0 + 1.05, 0.34)] + [(sx * (L + 0.5), sy * (W + 0.5), t0, 0.26) for sx in (-1, 1) for sy in (-1, 1)]:
+        box(x - s * 0.7, x + s * 0.7, y - s * 0.7, y + s * 0.7, h, h + s * 0.5, bm)     # acroteria
+        bmesh.ops.create_icosphere(bm, subdivisions=2, radius=s, matrix=Matrix.Translation((x, y, h + s * 1.2)))
+    return bm
+
 def build_figures(c, M):
     """Human figures (1.75 m) for scale, placed like those in Boullée's drawings."""
     rnd = random.Random(3)
@@ -1083,12 +1170,12 @@ def build_figures(c, M):
     group(0, -133, pt, 6, 6)           # at the head of the main stair
     group(-12, -175, 0.03, 7, 5)       # esplanade
     group(14, -190, 0.03, 4, 3)
-    group(-6, -60, pt, 5, 4)           # before the tunnel
-    group(10, -48, pt, 3, 2)
+    group(-6, -113, pt, 5, 4)          # before the arch
+    group(10, -116, pt, 3, 2)
     group(-14, -96, dt, 6, 3)          # on the bridge terrace
     group(9, -96, dt, 4, 2)
     group(-26, -300, 0.03, 3, 2); group(26, -420, 0.03, 4, 2)  # along the basin
-    group(4.2, -3.5, CZ_floor() + 3.0, 2, 0.6)  # inside, beside the sarcophagus
+    group(7.5, -5.0, D["floor_top"], 3, 1.0)    # inside, on the floor below the sarcophagus
 
 def CZ_floor():
     return D["sphere_cz"] - D["shell_inner_R"]
@@ -1148,7 +1235,7 @@ def build_lights_cameras(c):
     cam("CAM_Elevation_ortho", (0, -1500, 83.2), (0, 0, 83.2), ortho=301.2)
     cam("CAM_Plan_ortho", (0, 0, 1500), (0, 0, 0), ortho=335.4)
     cam("CAM_Terrace_among_cypress", (-34.5, -100.2, D["drum_top"] + 1.65), (-55, -30, 75), 16)
-    cam("CAM_Interior_vault", (0, -13, 10.85), (0, 20, 42), 12)
+    cam("CAM_Interior_vault", (6, -24, D["floor_top"] + 0.6), (0, 20, 60), 13)
     cam("CAM_Forecourt", (-62, -150, D["platform_top"] + 1.7), (0, -30, 44), 20)
     sc.camera = hero
 

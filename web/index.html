@@ -53,12 +53,14 @@
   #keys b { font-weight: 500; }
 
   /* touch */
+  #phone { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 6px 12px; border-radius: 3px; background: rgba(12, 15, 20, .5); font-size: 13px; white-space: nowrap; opacity: 0; transition: opacity .6s; }
+  #phone.on { opacity: 1; }
   #stick, #jump { position: absolute; display: none; pointer-events: auto; touch-action: none; border: 1px solid rgba(255, 255, 255, .55);
                          border-radius: 50%; background: rgba(12, 15, 20, .22); }
   #stick { left: 26px; bottom: 30px; width: 122px; height: 122px; }
   #stick i { position: absolute; left: 50%; top: 50%; width: 50px; height: 50px; margin: -25px; border-radius: 50%; background: rgba(255, 255, 255, .6); }
   #jump { right: 26px; bottom: 34px; width: 66px; height: 66px; color: #fff; font-size: 12px; }
-  .touch #stick, .touch #jump { display: block; }
+  .no-sensors #stick, .no-sensors #jump { display: block; }
   .touch #keys { display: none; }
   @media (max-width: 720px) { #places { font-size: 12px; right: 10px; top: 10px; } #where { font-size: 17px; left: 14px; top: 12px; max-width: 42vw; } #where small { display: none; } }
 </style>
@@ -71,7 +73,7 @@
     <div id="thumbs" role="group" aria-label="Boullée's drawings"></div>
   </figure>
   <h1>Cénotaphe de Newton</h1>
-  <p>In 1784, five years before the Revolution, Paris was captivated by Enlightenment science. The Montgolfier brothers had just flown the first balloons, and Newton, dead since 1727, had become the hero of reason. The architect Étienne-Louis Boullée answered with a design no one had asked for: a hollow sphere for Newton's tomb, its vault pierced so that daylight would fall through as stars. It was never built.</p>
+  <p>In 1784, five years before the Revolution, Paris was captivated by Enlightenment science. The Montgolfier brothers had just flown the first balloons, and Newton, dead since 1727, had become the hero of reason. The architect Étienne-Louis Boullée answered with a design no one had asked for: a hollow sphere for Newton's tomb, its vault pierced so that daylight would fall through as stars. It was never built. Here the openings follow the real sky over Woolsthorpe on the night Newton was born.</p>
   <p id="about">Published accounts put the sphere at 150 m.</p>
   <div id="bar"><i></i></div>
   <button id="enter" hidden>Enter</button>
@@ -81,6 +83,7 @@
   <div id="where"><span id="whereName"></span><small id="whereNote"></small></div>
   <nav id="places" aria-label="Go to a place"></nav>
   <div id="keys"><b>WASD</b> walk &nbsp;·&nbsp; <b>Shift</b> run &nbsp;·&nbsp; <b>Space</b> jump &nbsp;·&nbsp; <b>Mouse</b> look &nbsp;·&nbsp; <b>Esc</b> free the cursor &nbsp;·&nbsp; <b>Hold T</b> run the sun &nbsp;·&nbsp; <b>[ ]</b> field of view</div>
+  <div id="phone">Turn to look, and walk to move</div>
   <div id="stick"><i></i></div>
   <button id="jump">Jump</button>
 </div>

@@ -10,5 +10,8 @@
     "esbuild": "0.28.2",
     "three": "0.186.1",
     "three-mesh-bvh": "0.9.16"
+  },
+  "devDependencies": {
+    "astronomy-engine": "2.1.19"
   }
 }

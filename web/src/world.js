@@ -9,6 +9,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
 import { noise3, rng, smooth, SCALE } from './util.js';
 import { figureGeometries } from './character.js';
+import { makeSunshafts } from './sunshafts.js';
 
 export const CENTER = new THREE.Vector3(0, 73.5, 0);        // sphere centre
 export const SUN = new THREE.Vector3();
@@ -26,7 +27,7 @@ export function groundHeight(x, z) {
   return (Math.sin(x * 0.0021 + 1.3) * Math.cos(y * 0.0017 - 0.4) + 0.6 * Math.sin(x * 0.0047 + y * 0.0031)) * 70 * k ** 1.4;
 }
 
-const NOT_SOLID = new Set(['Main stair', 'Front stair block', 'Planting beds', 'Lions', 'Funeral brazier',
+const NOT_SOLID = new Set(['Main stair', 'Front stair block', 'Planting beds', 'Lions', 'Funeral brazier', 'Inscription',
                            'Esplanade and walks', 'Drum dentils', 'Bridge portal door']);
 
 // ------------------------------------------------------------------ texturing
@@ -146,65 +147,41 @@ function skyThroughHoles(buffer, geometries) {
 
 // ----------------------------------------------------------------- vegetation
 // 'Stricta' outline: a slender column drawn to a point, widest below the middle
-const cypressOutline = (t) => smooth(0, 0.1, t) ** 0.5 * (1 - t ** 2.4) ** 0.85;
-const CYPRESS_R = 1.2, CYPRESS_BASE = 0.8;
+const cypressOutline = (t) => smooth(0, 0.08, t) ** 0.5 * (1 - t ** 2.6) ** 0.8;
+const CYPRESS_R = 1.42, CYPRESS_BASE = 0.55;
 
-function cypressGeometry(seg, rings, seed, H, core) {
-  const pos = [], nor = [], uv = [], col = [], idx = [];
-  const rad = (a, t, z) => {
-    const n = noise3(Math.cos(a) * 1.3 + seed, z * 0.34, Math.sin(a) * 1.3 + seed) - 0.5;
-    const plumes = Math.sin(a * 7 + seed + z * 0.55 + 2.2 * n);
-    return Math.max(CYPRESS_R * cypressOutline(t) * (1 + 0.3 * n + 0.09 * plumes) * (core ? 0.84 : 1), 0.015);
-  };
-  for (let j = 0; j <= rings; j++) {
-    const t = j / rings, z = CYPRESS_BASE - 0.3 + t * (H - CYPRESS_BASE + 0.3);
-    for (let i = 0; i <= seg; i++) {
-      const a = ((i % seg) / seg) * Math.PI * 2, r = rad(a, t, z);
-      pos.push(Math.cos(a) * r, z, Math.sin(a) * r);
-      uv.push((i / seg) * 3, z / 3.2);
-      const shade = (0.55 + 0.45 * smooth(0, 0.32, t) * (0.72 + 0.56 * noise3(Math.cos(a) * 3 + seed, z, Math.sin(a) * 3))) * (core ? 0.42 : 1);
-      col.push(shade, shade, shade);
+/**
+ * One tree, one body: upright flame-shaped sprays packed round the trunk on a spiral, the way
+ * cypress foliage really grows. Fewer, broader sprays make the distant versions of the same tree.
+ */
+function cypressTree(sprays, sides, rings, seed, H) {
+  const r = rng(Math.round(seed * 991) + 17), pos = [], nor = [], uv = [], col = [], idx = [];
+  const fat = Math.sqrt(64 / sprays), axis = new THREE.Vector3(), side = new THREE.Vector3(), out = new THREE.Vector3(), radial = new THREE.Vector3(), p = new THREE.Vector3();
+  for (let i = 0; i < sprays; i++) {
+    const t = ((i + 0.5) / sprays) ** 0.86, a = i * 2.39996 + (r() - 0.5) * 0.5, ca = Math.cos(a), sa = Math.sin(a);
+    const edge = CYPRESS_R * cypressOutline(Math.min(t + 0.06, 1)), length = (2.5 + r() * 1.1) * (1 - 0.42 * t) * (0.8 + 0.2 * fat);
+    const width = Math.max(0.15, (0.34 + r() * 0.12) * fat * (1.05 - 0.6 * t)), low = CYPRESS_BASE + t * (H - CYPRESS_BASE - length * 0.55);
+    const hip = new THREE.Vector3(ca * edge * 0.3, low, sa * edge * 0.3), tip = new THREE.Vector3(ca * edge * (0.72 + r() * 0.26), low + length, sa * edge * (0.72 + r() * 0.26));
+    axis.subVectors(tip, hip).normalize(); side.set(-sa, 0, ca); out.crossVectors(side, axis).negate();
+    const base = pos.length / 3, tone = (0.6 + 0.46 * smooth(0, 0.4, t)) * (0.78 + r() * 0.42);
+    for (let j = 0; j <= rings; j++) {
+      const s = j / rings, swell = Math.sin(Math.PI * s ** 0.62) ** 0.75, wobble = 1 + 0.16 * Math.sin(s * 9 + i);
+      for (let k = 0; k <= sides; k++) {
+        const q = ((k % sides) / sides) * Math.PI * 2, cq = Math.cos(q), sq = Math.sin(q), w = width * swell * wobble;
+        p.lerpVectors(hip, tip, s).addScaledVector(side, cq * w).addScaledVector(out, sq * w * 0.8);
+        p.x += ca * 0.28 * Math.sin(Math.PI * s); p.z += sa * 0.28 * Math.sin(Math.PI * s);
+        pos.push(p.x, p.y, p.z);
+        radial.set(ca, 0.12, sa).multiplyScalar(0.72).addScaledVector(side, cq * 0.5).addScaledVector(out, sq * 0.5).normalize();
+        nor.push(radial.x, radial.y, radial.z);
+        uv.push((k / sides) * 1.4, (s * length) / 2.4 + i * 0.37);
+        const shade = tone * (0.34 + 0.8 * smooth(0.1, 0.85, s)) * (0.78 + 0.22 * sq);
+        col.push(shade, shade, shade);
+      }
     }
-  }
-  for (let j = 0; j < rings; j++) for (let i = 0; i < seg; i++) {
-    const a = j * (seg + 1) + i, b = a + seg + 1;
-    idx.push(a, b, a + 1, b, b + 1, a + 1);
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  const n = g.attributes.normal;     // close the seam
-  for (let j = 0; j <= rings; j++) {
-    const a = j * (seg + 1), b = a + seg;
-    const x = n.getX(a) + n.getX(b), y = n.getY(a) + n.getY(b), z = n.getZ(a) + n.getZ(b), l = Math.hypot(x, y, z) || 1;
-    n.setXYZ(a, x / l, y / l, z / l); n.setXYZ(b, x / l, y / l, z / l);
-  }
-  return g;
-}
-
-/** Up-swept foliage sprays around the core, shaded as if the crown were one soft mass. */
-function cypressSprays(count, seed, H, grow = 1) {
-  const r = rng(seed * 997 + 3), pos = [], nor = [], uv = [], col = [], idx = [];
-  const tangent = new THREE.Vector3(), rise = new THREE.Vector3(), normal = new THREE.Vector3(), c = new THREE.Vector3();
-  for (let i = 0; i < count; i++) {
-    const t = 0.03 + 0.95 * r() ** 0.8, a = r() * Math.PI * 2, z = CYPRESS_BASE + t * (H - CYPRESS_BASE), ca = Math.cos(a), sa = Math.sin(a);
-    const radius = CYPRESS_R * cypressOutline(t) * (0.82 + 0.2 * r()), slim = 0.55 + 0.6 * (1 - t);
-    const w = (0.8 + 0.35 * r()) * slim * grow, h = (1.5 + 0.7 * r()) * slim * grow, lean = -0.12 - 0.22 * t;
-    tangent.set(-sa, 0, ca); rise.set(ca * lean, 1, sa * lean).normalize(); normal.set(ca, 0.28, sa).normalize();
-    c.set(ca * radius, z - h * 0.4, sa * radius);
-    const shade = (0.5 + 0.55 * smooth(0, 0.3, t)) * (0.78 + 0.36 * r()), base = pos.length / 3;
-    for (const [u, v] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
-      const o = (v ? 0.14 : 0) * (1 + r());
-      pos.push(c.x + tangent.x * (u - 0.5) * w + rise.x * v * h + ca * o, c.y + rise.y * v * h, c.z + tangent.z * (u - 0.5) * w + rise.z * v * h + sa * o);
-      nor.push(normal.x, normal.y, normal.z);
-      uv.push(u, v);
-      const k = shade * (v ? 1 : 0.6);
-      col.push(k, k, k);
+    for (let j = 0; j < rings; j++) for (let k = 0; k < sides; k++) {
+      const u = base + j * (sides + 1) + k, v = u + sides + 1;
+      idx.push(u, v, u + 1, v, v + 1, u + 1);
     }
-    idx.push(base, base + 1, base + 3, base, base + 3, base + 2, base + 3, base + 1, base, base + 2, base + 3, base);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -213,25 +190,6 @@ function cypressSprays(count, seed, H, grow = 1) {
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   g.setIndex(idx);
   return g;
-}
-
-/** One foliage spray, drawn at load: overlapping scale-leaf strokes tapering to a tip. */
-function sprayTexture(renderer) {
-  const c = document.createElement('canvas'); c.width = c.height = 256;
-  const x = c.getContext('2d'), r = rng(21);
-  x.lineCap = 'round';
-  for (let i = 0; i < 900; i++) {
-    const v = r() ** 0.8, half = 104 * (1 - v) ** 0.62 * (0.25 + 0.75 * smooth(0, 0.14, v));
-    const px = 128 + (r() * 2 - 1) * half, py = 252 - v * 244, side = Math.sign(px - 128) || 1;
-    const len = 7 + r() * 16;
-    x.strokeStyle = `hsl(${92 + r() * 30} ${16 + r() * 18}% ${22 + r() * 34}%)`;
-    x.lineWidth = 1.6 + r() * 3.4;
-    x.beginPath(); x.moveTo(px, py); x.quadraticCurveTo(px + side * len * 0.15, py - len * 0.7, px + side * len * 0.45, py - len); x.stroke();
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-  return t;
 }
 
 class TreeHash {
@@ -245,7 +203,7 @@ class TreeHash {
   }
 }
 
-function makeTrees(buffer, foliage, sprays, scene) {
+function makeTrees(buffer, foliage, scene) {
   const head = new Uint32Array(buffer, 0, 2), [nTrees, nWood] = head;
   const data = new Float32Array(buffer, 8, nTrees * 6), wood = new Float32Array(buffer, 8 + nTrees * 24, nWood * 4);
   const VARIANTS = 3, heights = [10.0, 10.7, 11.2], r = rng(7), hash = new TreeHash(6);
@@ -256,22 +214,18 @@ function makeTrees(buffer, foliage, sprays, scene) {
   const trunks = new THREE.InstancedMesh(trunkGeo, bark, nTrees);
   const sets = [];
   for (let v = 0; v < VARIANTS; v++) {
-    // every tree carries real foliage; further off, fewer and larger sprays stand in for the same mass
-    const far = new THREE.InstancedMesh(cypressGeometry(10, 10, v * 9.1, heights[v], true), foliage, nTrees);
-    const near = new THREE.InstancedMesh(cypressGeometry(24, 30, v * 9.1, heights[v], true), foliage, nTrees);
-    const lean = matchMedia('(pointer: coarse)').matches ? 0.5 : 1;   // phones get half the sprays, each larger
-    const fronds = new THREE.InstancedMesh(cypressSprays(420 * lean, v * 9.1, heights[v], 1 / Math.sqrt(lean)), sprays, nTrees);
-    const farFronds = new THREE.InstancedMesh(cypressSprays(150 * lean, v * 9.1, heights[v], 1.65 / Math.sqrt(lean)), sprays, nTrees);
-    for (const mesh of [far, near, fronds, farFronds]) { mesh.frustumCulled = false; mesh.receiveShadow = true; }
-    far.castShadow = near.castShadow = true;
-    near.count = fronds.count = 0;
-    sets.push({ far, near, fronds, farFronds }); scene.add(far, near, fronds, farFronds);
+    sets.push([[64, 6, 4], [30, 4, 3], [14, 3, 2]].map(([sprays, sides, rings]) => {
+      const mesh = new THREE.InstancedMesh(cypressTree(sprays, sides, rings, v * 9.1, heights[v]), foliage, nTrees);
+      mesh.frustumCulled = false; mesh.receiveShadow = mesh.castShadow = true; mesh.count = 0;
+      scene.add(mesh);
+      return mesh;
+    }));
   }
   for (let i = 0; i < nTrees; i++) {
     const o = i * 6, t = { x: data[o], y: data[o + 1], z: data[o + 2], r: 1.35, v: i % VARIANTS };   // crowns nearly touch: the rows are hedges
     p.set(t.x, t.y, t.z); q.setFromAxisAngle(yAxis, data[o + 3]); s.set(data[o + 4], data[o + 5], data[o + 4]);
     t.matrix = m.compose(p, q, s).clone();
-    tint.setHSL(0.27 + r() * 0.035, 0.3 + r() * 0.12, 0.36 + r() * 0.12);
+    tint.setHSL(0.29 + r() * 0.03, 0.42 + r() * 0.12, 0.26 + r() * 0.08);
     t.color = tint.clone();
     trunks.setMatrixAt(i, t.matrix);
     trees.push(t); hash.add(t);
@@ -279,23 +233,18 @@ function makeTrees(buffer, foliage, sprays, scene) {
   trunks.castShadow = true; trunks.frustumCulled = false;
   scene.add(trunks);
 
-  // two detail levels; only trees close to the walker use the fine one
+  // three detail levels of the same tree, by distance from the walker
   function updateLOD(x, z, nearDist) {
-    const n2 = nearDist * nearDist, counts = sets.map(() => [0, 0]);
+    const n2 = nearDist * nearDist, m2 = 16 * n2, counts = sets.map(() => [0, 0, 0]);
     for (const t of trees) {
-      const d = (t.x - x) ** 2 + (t.z - z) ** 2, set = sets[t.v], c = counts[t.v];
-      const isNear = d < n2, mesh = isNear ? set.near : set.far, k = isNear ? c[0]++ : c[1]++;
-      const leaves = isNear ? set.fronds : set.farFronds;
+      const d = (t.x - x) ** 2 + (t.z - z) ** 2, lod = d < n2 ? 0 : d < m2 ? 1 : 2, k = counts[t.v][lod]++, mesh = sets[t.v][lod];
       mesh.setMatrixAt(k, t.matrix); mesh.setColorAt(k, t.color);
-      leaves.setMatrixAt(k, t.matrix); leaves.setColorAt(k, t.color);
     }
-    sets.forEach((set, v) => {
-      set.near.count = set.fronds.count = counts[v][0]; set.far.count = set.farFronds.count = counts[v][1];
-      for (const mesh of [set.near, set.far, set.fronds, set.farFronds]) {
-        mesh.instanceMatrix.needsUpdate = true;
-        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-      }
-    });
+    sets.forEach((lods, v) => lods.forEach((mesh, l) => {
+      mesh.count = counts[v][l];
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }));
   }
 
   // distant broadleaf woods
@@ -315,7 +264,7 @@ function makeTrees(buffer, foliage, sprays, scene) {
   }
   woods.frustumCulled = false;
   scene.add(woods);
-  return { hash, updateLOD, count: nTrees, castShadows(on) { for (const s of sets) s.far.castShadow = s.near.castShadow = on; } };
+  return { hash, updateLOD, count: nTrees };
 }
 
 function makeGround(grassMap, grassNormal) {
@@ -483,8 +432,8 @@ function makeFire() {
 }
 
 function makeVisitors(scene) {
-  const r = rng(5), spots = [[-8, 5.5, 132, 5], [9, 5.5, 136, 3], [-6, 5.5, 60, 4], [11, 5.5, 50, 3], [-14, 46.5, 96, 4], [10, 46.5, 98, 3],
-                             [-17, 0, 178, 4], [15, 0, 188, 3], [-26, 0, 310, 2], [26, 0, 430, 3], [3.2, 9.5, 2.5, 2], [-24, 5.5, 150, 2], [-11, 9.5, -4, 4], [13, 9.5, 8, 4], [-8, 9.5, 12, 3], [15, 9.5, -12, 3],
+  const r = rng(5), spots = [[-8, 5.5, 132, 5], [9, 5.5, 136, 3], [-6, 5.5, 112, 4], [11, 5.5, 116, 3], [-14, 46.5, 96, 4], [10, 46.5, 98, 3],
+                             [-17, 0, 178, 4], [15, 0, 188, 3], [-26, 0, 310, 2], [26, 0, 430, 3], [-24, 5.5, 150, 2], [-14, 14, -6, 4], [15, 14, 9, 4], [-9, 14, 15, 3], [16, 14, -13, 3], [4.5, 17, 3.5, 2],
                              [-30, 5.5, 140, 5], [34, 5.5, 128, 4], [0, 0, 198, 6], [6, 64, 73, 3], [-22, 46.5, 92, 3], [24, 0, 640, 3], [-27, 0, 560, 2]];
   const black = new THREE.MeshBasicMaterial({ color: 0x000000, fog: false }), list = [];
   for (const g of figureGeometries()) {
@@ -505,7 +454,7 @@ export async function loadWorld(renderer, onProgress) {
   manager.onProgress = (_, done, total) => onProgress(done / total);
   const T = (name, srgb = false) => load(name, srgb, renderer, manager);
 
-  placeSun(0.3);
+  placeSun(0.2);
   const scene = new THREE.Scene();
   scene.fog = new THREE.FogExp2(0xd3dbe3, 0.00045 * Math.sqrt(SCALE));   // aerial haze, none up close
 
@@ -521,7 +470,6 @@ export async function loadWorld(renderer, onProgress) {
   const gravel = weathered(std({ color: new THREE.Color(1.22, 1.08, 0.88), map: T('gravel', true), normalMap: T('gravel_n'), normalScale: nS(0.5), roughness: 0.94 }), { streaks: 0 });
   const soil = std({ map: T('soil', true), roughness: 0.97 });
   const foliage = std({ map: T('cypress', true), normalMap: T('cypress_n'), normalScale: nS(1.2), vertexColors: true, roughness: 0.86 });
-  const sprays = std({ map: sprayTexture(renderer), alphaTest: 0.42, alphaToCoverage: true, vertexColors: true, roughness: 0.9 });
   const grass = [T('grass', true), T('grass_n')];
   const MATS = {
     'Vault: pierced shell (star holes)': [vault, 12, true], Bore: [dressed, 12 / SCALE], 'Limestone ashlar': [ashlar, 15.6 / SCALE], 'Limestone dressed': [dressed, 12 / SCALE], 'Limestone sphere': [sphere, 12, true],
@@ -566,11 +514,14 @@ export async function loadWorld(renderer, onProgress) {
   const collider = mergeGeometries(solids);
   const bvh = new MeshBVH(collider);
 
-  const trees = makeTrees(treeBuf, foliage, sprays, scene);
-  scene.add(makeGround(...grass));
+  const outdoors = new THREE.Group();                // none of this can be seen from inside the sphere
+  scene.add(outdoors);
+  const trees = makeTrees(treeBuf, foliage, outdoors);
+  outdoors.add(makeGround(...grass));
   const water = makeBasin();
-  scene.add(water);
+  outdoors.add(water);
   const sky = makeSky(renderer, scene);
+  sky.material.depthTest = false; sky.renderOrder = -1;   // it sits at the far plane, which the reversed depth buffer would put in front
   const fire = makeFire();
   scene.add(fire.group);
   makeVisitors(scene);
@@ -589,14 +540,14 @@ export async function loadWorld(renderer, onProgress) {
   const low = new THREE.Color(0xffb878), high = new THREE.Color(0xfff0dc);
   const skyUniforms = sky.material.uniforms;
   const refresh = () => {
-    const cam = sun.shadow.camera, half = close ? 170 : 560;
-    sun.target.position.set(0, 0, close ? 0 : 170);
+    const cam = sun.shadow.camera, half = close ? 84 : 560;
+    sun.target.position.set(0, close ? 73.5 : 0, close ? 0 : 170);
     sun.position.copy(sun.target.position).addScaledVector(SUN, 1100);
     Object.assign(cam, { left: -half, right: half, top: close ? half : 520, bottom: close ? -half : -520, near: 300, far: 1900 });
     cam.updateProjectionMatrix();
-    sun.shadow.bias = close ? -0.00006 : -0.0003;
-    sun.shadow.normalBias = close ? 0.03 : 0.35;
-    sun.shadow.radius = close ? 1 : 2.2;
+    sun.shadow.bias = close ? -0.0001 : -0.0003;
+    sun.shadow.normalBias = close ? 0.05 : 0.35;
+    sun.shadow.radius = close ? 1.6 : 2.2;
     renderer.shadowMap.needsUpdate = true;
   };
   const setSun = (u) => {
@@ -608,9 +559,21 @@ export async function loadWorld(renderer, onProgress) {
     SKY_LEVEL.value = 0.5 + 0.5 * lift;
     sun.position.copy(sun.target.position).addScaledVector(SUN, 1100);
   };
-  const shadowsClose = (on) => { if (on !== close) { close = on; trees.castShadows(!on); refresh(); } };
+  // in the void only the shell and what stands inside it can matter, so nothing else is drawn or shadowed
+  const casters = [];
+  root.traverse((o) => { if (o.isMesh && o.castShadow && !/^Sphere|^Sarcophagus|^Interior/.test(nameOf(o))) casters.push(o); });
+  const shadowsClose = (on) => {
+    if (on === close) return;
+    close = on; outdoors.visible = !on;
+    for (const o of casters) o.castShadow = !on;
+    refresh();
+  };
   refresh();
 
-  return { scene, bvh, trees, water, sky, fire, sun, setSun, refresh, shadowsClose, lamps };
+  const shafts = makeSunshafts(holeBuf, new THREE.Vector3(0, 14.6, 0));
+  shafts.mesh.visible = false;
+  scene.add(shafts.mesh);
+
+  return { scene, bvh, trees, water, sky, fire, sun, setSun, refresh, shadowsClose, lamps, shafts };
 
 }

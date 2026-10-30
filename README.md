@@ -6,7 +6,7 @@ A to-scale 3D model of Étienne-Louis Boullée's *Cénotaphe de Newton* (1784), 
 
 The page and the model's figures read the monument at 3× its published size: a 450 m sphere, judged by eye from the people and cypresses. Measured directly, the drawn figures put it closer to 130–180 m (see below), so 450 m is a choice for the sense of size, not a finding. Add `?scale=1`, `?scale=2` or `?scale=5` to compare. Model units stay in the published 150 m scale; only the figures change.
 
-Controls: WASD to walk, Shift to run, Space to jump, mouse to look, Esc to free the cursor, 1–7 to jump between places, R to reset, hold T to run the sun, [ and ] to change the field of view. On a phone, use the on-screen stick and drag to look.
+On a phone, turn to look and walk for real to move: the page counts your steps. Elsewhere: WASD to walk, Shift to run, Space to jump, mouse to look, Esc to free the cursor, 1–7 to jump between places, R to reset, hold T to run the sun, [ and ] to change the field of view. Without motion sensors, the on-screen stick and drag still work.
 
 ## Folder
 
@@ -63,11 +63,11 @@ Origin is the sphere's axis at natural ground. The front (main stair, tunnel) fa
 | Main stair | 42 m wide, 92 risers of 0.06 units, set into the terrace edge |
 | Drum (main cylinder) | Ø238 m wall, cornice Ø242 m, top at 46.5 m |
 | Upper tier | Ø164 m wall, cornice Ø166 m, top at 64 m |
-| Front opening in the drum | cone cut around the sphere, ±42 m wide at terrace level, ±74 m under the cornice; the cornice runs across as a bridge |
+| Front opening in the drum | circular cut, ±42 wide at terrace level, ±74 under the cornice, peeling back the outer skin to a plain cylinder of radius 104, as the even shading in the drawings shows; the cornice runs across as a thin bridge |
 | Front stair block | solid block against the upper tier, 79 m wide at the bridge, 21 m at the top, 21 m deep, with a flight of 292 risers of 0.06 units on each side and the small door at its foot |
-| Passages | 3.9 units high and 4.4 wide, from the front arch and from two doors beside the main stair, meeting under the sphere. The door routes run about 160 units under the whole terrace |
-| Ramp | climbs at about 24° through the floor to the sarcophagus at 9.5 units |
-| Vault openings | 2,200 bores cut by boolean through the shell, above the upper tier, aimed at the sarcophagus and flaring inward |
+| Passages | 3.9 units high and 4.4 wide, level with the terrace, from the arch in the cylinder and from the east and west sides of the drum, each about 100 units long |
+| Floor | a raised floor at 14 units with a low mound to 17 units under the sarcophagus. Each passage ramps up at about 25° and comes out below it |
+| Vault openings | the sky over Woolsthorpe at Newton's birth: each star above the horizon is a bore cut by boolean through the shell, sized by its brightness and aimed at the sarcophagus |
 
 ## The cypresses
 
@@ -105,8 +105,10 @@ If you want a concrete version, swap the `Limestone ashlar` and `Limestone dress
 - How deep the front bridge is can't be read from an elevation. It is modelled as the full width of the drum cornice.
 - The front stairs are read as a solid block standing against the upper tier, not a V cut into it. A cut left the tier overhanging its own stairs, and the block fits the hatched band in front of the tier on the plan and the door at the foot of the trapezoid on the elevation.
 - The drawings show no stair from the ground terrace up to the drum terrace, so the page has none. Its number keys jump there instead.
-- The section (sheet 04) shows a long, low passage under the floor, rising to the sarcophagus. The doors beside the main stair are my reading: the section doesn't run through the front, and the arch in the elevation stands close to the centre.
-- The bores are aimed at the sarcophagus so the sky shows from the floor, and the oil lamps in the passages are my addition: without them the middle of a passage is pitch dark.
+- The section (sheet 04) shows a long, low passage at terrace level, rising to the sarcophagus. I read it as cross-section through the east and west, with the elevation's arch as the front way in.
+- The vault's stars are my addition to the idea: `web/tools/birth_sky.mjs` places them from the HYG catalogue for 25 Dec 1642 (Julian) at Woolsthorpe, corrected for proper motion and precession. No reliable source records the hour, so 2 a.m. is an assumption. South lies over the front.
+- The inscription is my wording, echoing Newton's Westminster Abbey epitaph: ISAACO NEWTONO / QVI NATVRAE LEGES PATEFECIT / HVMANI GENERIS DECVS. The sheet shows only faint lines there.
+- The oil lamps in the passages are my addition: without them the middle of a passage is pitch dark.
 - The drawings show the lions only as small dark shapes, so their pose and modelling are my reading. The brazier, small portal and people are simplified stand-ins for scale.
 - The interior galleries shown in the section, inside the drum, are not modelled. The drum is solid.
 - Seen from a few metres away, the cypress foliage looks lumpy. It reads well from the normal viewing distances.
@@ -117,7 +119,7 @@ If you want a concrete version, swap the `Limestone ashlar` and `Limestone dress
 Nothing inside is painted on. The sun moves across the sky, and everything it does comes from the geometry:
 
 - **Sun:** one light with a shadow map. Underground and in the void the map closes in on the shell, fine enough to resolve the bores, so light lands only where a bore really lines up with the sun.
-- **Shafts in the air:** each pixel's ray is marched through that same shadow map, in `web/src/sunshafts.js`.
+- **Shafts in the air:** each bore is tested against the sun as the real tapering hole it is, and the light through it is drawn with the exact length of the view ray inside the beam, in `web/src/sunshafts.js`.
 - **Sky light inside the sphere:** the form factor from every bore to every vertex, plus the exact interreflection for a closed sphere.
 - **Sky light and bounce elsewhere:** path traced in Cycles into the vertices by `scripts/export_web.py`, along with the passage lamps. The bounce is baked from a midday sun, so it doesn't move with the sun.
 - **Exposure:** the eye adapts as you go from daylight into the dark.
