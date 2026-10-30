@@ -499,51 +499,13 @@ def mat_bark():
     return mat_simple("Cypress bark", (0.12, 0.07, 0.045, 1), 0.9)
 
 def mat_stars(name="Vault: pierced shell (star holes)"):
-    """Inner face of the sphere. Boullée pierced the vault so daylight would
-    read as stars; here the holes are emissive points, denser along a Milky Way band."""
-    m, nt, bsdf, out = node_mat(name)
-    tc = nt.nodes.new("ShaderNodeTexCoord")
-    nrm = nt.nodes.new("ShaderNodeVectorMath"); nrm.operation = "NORMALIZE"
-    off = nt.nodes.new("ShaderNodeVectorMath"); off.operation = "SUBTRACT"
-    off.inputs[1].default_value = (0, 0, D["sphere_cz"])
-    nt.links.new(tc.outputs["Object"], off.inputs[0]); nt.links.new(off.outputs[0], nrm.inputs[0])
-    def star_layer(scale, size):
-        v = nt.nodes.new("ShaderNodeTexVoronoi"); v.inputs["Scale"].default_value = scale
-        v.inputs["Randomness"].default_value = 1.0
-        nt.links.new(nrm.outputs[0], v.inputs["Vector"])
-        lt = math_node(nt, "LESS_THAN", v.outputs["Distance"], None, 0, size)
-        return lt, v
-    s1, v1 = star_layer(22, 0.06)
-    s2, v2 = star_layer(55, 0.05)
-    s3, v3 = star_layer(140, 0.09)
-    # Milky Way band: tilted great circle
-    band = nt.nodes.new("ShaderNodeVectorMath"); band.operation = "DOT_PRODUCT"
-    band.inputs[1].default_value = (0.35, 0.55, 0.76)
-    nt.links.new(nrm.outputs[0], band.inputs[0])
-    absb = math_node(nt, "ABSOLUTE", band.outputs["Value"])
-    mw = ramp(nt, [(0.0, (1, 1, 1, 1)), (0.12, (0, 0, 0, 1))])
-    nt.links.new(absb.outputs[0], mw.inputs[0])
-    nmw = noise(nt, nrm.outputs[0], 6, 6, 0.6)
-    mwn = math_node(nt, "MULTIPLY", mw.outputs[0], nmw.outputs["Fac"])
-    s3m = math_node(nt, "MULTIPLY", s3.outputs[0], mw.outputs[0])
-    tot = math_node(nt, "ADD", math_node(nt, "MULTIPLY", s1.outputs[0], None, 0, 6.0).outputs[0],
-                    math_node(nt, "ADD", math_node(nt, "MULTIPLY", s2.outputs[0], None, 0, 2.5).outputs[0],
-                              math_node(nt, "ADD", s3m.outputs[0],
-                                        math_node(nt, "MULTIPLY", mwn.outputs[0], None, 0, 0.004).outputs[0]).outputs[0]).outputs[0])
-    # the moon of Boullée's section: one larger opening
-    md = nt.nodes.new("ShaderNodeVectorMath"); md.operation = "DOT_PRODUCT"
-    md.inputs[1].default_value = Vector((-0.45, 0.35, 0.82)).normalized()
-    nt.links.new(nrm.outputs[0], md.inputs[0])
-    moon = math_node(nt, "GREATER_THAN", md.outputs["Value"], None, 0, math.cos(math.radians(1.6)))
-    tot = math_node(nt, "ADD", tot.outputs[0], math_node(nt, "MULTIPLY", moon.outputs[0], None, 0, 4.0).outputs[0])
-    inp(bsdf, "Base Color").default_value = (0.03, 0.035, 0.05, 1)
-    inp(bsdf, "Roughness").default_value = 0.95
-    inp(bsdf, "Emission Color").default_value = (0.85, 0.9, 1.0, 1)
-    es = math_node(nt, "MULTIPLY", tot.outputs[0], None, 0, 25.0)
-    nt.links.new(es.outputs[0], inp(bsdf, "Emission Strength"))
+    """Plain dark stone. The stars are the real bores cut through it."""
+    m = bpy.data.materials.new(name); m.use_nodes = True
+    n = m.node_tree.nodes["Principled BSDF"]
+    n.inputs["Base Color"].default_value = (0.42, 0.38, 0.32, 1)
+    n.inputs["Roughness"].default_value = 0.9
     return m
 
-# ------------------------------------------------------------------- scene
 def build():
     reset()
     sc = bpy.context.scene

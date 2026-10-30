@@ -44,7 +44,7 @@ npm run serve
 
 It serves at http://localhost:8123/. Add `?debug` to expose the test hooks as `window.walk`.
 
-A full render of all seven views takes about 20 minutes on the M3. Use `--pct 40 --samples 24` for quick previews, and `--cams CAM_Hero_aerial` for one view.
+A full render of all seven views takes about 25 minutes on the M3. `renders/interior_vault.png` is a capture of the page instead: light through bores this narrow is almost pitch dark to a path tracer, so Cycles shows a nearly black image. Use `--pct 40 --samples 24` for quick previews, and `--cams CAM_Hero_aerial` for one view.
 
 ## How the scale was set
 
@@ -95,7 +95,7 @@ Boullée designed this in 1784, before modern concrete, as cut stone. The model 
 - **Drum and terrace walls:** coursed limestone ashlar, about 2.6 × 1.3 m blocks with fine joints, as drawn on the elevation. Paris Lutetian limestone colour, with weathering.
 - **Sphere, cornices, stairs, sculpture:** smooth dressed limestone, with faint vertical rain streaks on the sphere.
 - **Terrace walks:** limestone paving on the ground terrace and gravel on the upper terraces. The trees stand in soil beds.
-- **Inside the vault:** Boullée pierced the shell so daylight would show as stars. These openings are modelled as emissive points, denser along a Milky Way band, with the larger "moon" opening from his section.
+- **Inside the vault:** Boullée pierced the shell so daylight would show as stars. Here they are real bores through plain stone, placed from the sky at Newton's birth, with the Moon as the largest opening.
 
 If you want a concrete version, swap the `Limestone ashlar` and `Limestone dressed` materials in the .blend. The shapes don't change.
 

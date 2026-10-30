@@ -53,7 +53,7 @@ VIEW = {
     "CAM_Approach_basin": ((1920, 1080), 0.0),
     "CAM_Forecourt": ((1920, 1080), 0.0),
     "CAM_Terrace_among_cypress": ((1920, 1080), 0.0),
-    "CAM_Interior_vault": ((1920, 1080), 1.0),
+    "CAM_Interior_vault": ((1920, 1080), 10.0),
     "CAM_Elevation_ortho": ((1536, 921), 0.0),      # same pixel grid as Boullée sheet 03
     "CAM_Plan_ortho": ((1024, 1024), 0.0),          # same pixel grid as Boullée sheet 01
 }
