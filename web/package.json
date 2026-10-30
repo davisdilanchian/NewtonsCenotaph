@@ -1,0 +1,14 @@
+{
+  "name": "newtons-cenotaph-walk",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "serve": "node build.mjs && npx --yes http-server@14.1.1 dist -p 8123 -c-1 --silent"
+  },
+  "dependencies": {
+    "esbuild": "0.28.2",
+    "three": "0.186.1",
+    "three-mesh-bvh": "0.9.16"
+  }
+}

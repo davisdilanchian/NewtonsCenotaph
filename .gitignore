@@ -2,3 +2,6 @@
 *.blend1
 *.blend@
 __pycache__/
+web/node_modules/
+web/dist/
+.claude/

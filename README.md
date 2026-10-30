@@ -2,6 +2,10 @@
 
 A to-scale 3D model of Étienne-Louis Boullée's *Cénotaphe de Newton* (1784), an unbuilt monument known only from his drawings. Built in Blender 5.0 and rendered with Cycles.
 
+**[Walk through it in your browser](https://davisdilanchian.github.io/NewtonsCenotaph/)** (first-person, three.js).
+
+Controls: WASD to walk, Shift to run, Space to jump, mouse to look, Esc to free the cursor, 1–7 to jump between places, R to reset. On a phone, use the on-screen stick and drag to look.
+
 ## Folder
 
 | Path | What it is |
@@ -14,6 +18,9 @@ A to-scale 3D model of Étienne-Louis Boullée's *Cénotaphe de Newton* (1784), 
 | `scripts/render_views.py` | Renders the cameras |
 | `scripts/compare.py` | Makes the drawing-vs-render comparison images |
 | `scripts/export_glb.py` | Writes the .glb |
+| `scripts/export_web.py` | Writes the page's compressed monument, walk colliders and tree positions |
+| `scripts/make_web_textures.py` | Generates the page's tiling stone, ground and foliage textures |
+| `web/` | The walkable page. `.github/workflows/pages.yml` builds and deploys it on every push to `web/` |
 | `docs/dimensions.json` | The dimensions and tree counts the last build used |
 
 ## Rebuild
@@ -24,6 +31,16 @@ cd ~/Documents/NewtonsCenotaph
 /Applications/Blender.app/Contents/MacOS/Blender -b model/newtons_cenotaph.blend -P scripts/render_views.py -- --samples 128
 /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup -P scripts/compare.py
 ```
+
+To run the page locally:
+
+```bash
+cd ~/Documents/NewtonsCenotaph/web
+npm ci
+npm run serve
+```
+
+It serves at http://localhost:8123/. Add `?debug` to expose the test hooks as `window.walk`.
 
 A full render of all seven views takes about 20 minutes on the M3. Use `--pct 40 --samples 24` for quick previews, and `--cams CAM_Hero_aerial` for one view.
 
@@ -45,8 +62,9 @@ Origin is the sphere's axis at natural ground. The front (main stair, tunnel) fa
 | Drum (main cylinder) | Ø238 m wall, cornice Ø242 m, top at 46.5 m |
 | Upper tier | Ø164 m wall, cornice Ø166 m, top at 64 m |
 | Front opening in the drum | cone cut around the sphere, ±42 m wide at terrace level, ±74 m under the cornice; the cornice runs across as a bridge |
-| Upper-tier front cut | V shape, 79 m wide at the bridge, 21 m at the top, with a stair flight on each edge |
+| Front stair block | solid block against the upper tier, 79 m wide at the bridge, 21 m at the top, 21 m deep, with a flight of 35 risers of 0.5 m on each side and the small door at its foot |
 | Entrance tunnel | 14 m wide, 8 m high, at terrace level |
+| Dais stair | 16 risers of 0.25 m, from the tunnel floor up to the sarcophagus at 9.5 m |
 
 ## The cypresses
 
@@ -61,7 +79,7 @@ Close-up, each band of trees in the plan is a **double, staggered row**. So ther
 | Ground terrace, outer | 147.0, 149.7 | 263 + 264 |
 | **Total** | | **2,139** |
 
-Each band stops at the front, where the stairs pass (±23° on the drum and ±24° on the terrace, measured from the plan). On the upper tier the trees stop at the edge of the V cut.
+Each band stops at the front, where the stairs pass (±23° on the drum and ±24° on the terrace, measured from the plan). On the upper tier the trees stop at the edge of the stair block.
 
 The trees are Italian cypress (*Cupressus sempervirens* 'Stricta'), 9.6–11.4 m tall, which matches the 10–11 m Boullée drew. Eight tree shapes are shared across the rows, each with its own random height, rotation and tint.
 
@@ -82,6 +100,9 @@ If you want a concrete version, swap the `Limestone ashlar` and `Limestone dress
 
 - The drawings don't fully agree with each other. Where they differed, I followed the elevation for heights and the plan for radii and tree rows.
 - How deep the front bridge is can't be read from an elevation. It is modelled as the full width of the drum cornice.
+- The front stairs are read as a solid block standing against the upper tier, not a V cut into it. A cut left the tier overhanging its own stairs, and the block fits the hatched band in front of the tier on the plan and the door at the foot of the trapezoid on the elevation.
+- The drawings show no stair from the ground terrace up to the drum terrace, so the page has none. Its number keys jump there instead.
+- The dais stair inside the sphere is a plain stair I added so visitors can reach the sarcophagus. It is not taken from a drawing.
 - The sphinxes, brazier, small portal and people are simplified stand-ins for scale. They are not detailed sculpture.
 - The interior galleries shown in the section, inside the drum, are not modelled. The drum is solid.
 - Seen from a few metres away, the cypress foliage looks lumpy. It reads well from the normal viewing distances.
@@ -94,5 +115,7 @@ If you want a concrete version, swap the `Limestone ashlar` and `Limestone dress
 - [Numéro Cinq: Visit Boullée's Cenotaph for Sir Isaac Newton](https://numerocinqmagazine.com/2016/11/24/visit-etienne-louis-boullees-cenotaph-sir-isaac-newton-gary-garvin/)
 - [The Marginalian on the cenotaph](https://www.themarginalian.org/2021/03/18/etienne-louis-boullee-newton-cenotaph/)
 - [UT Pictura18: perspective elevation record](https://utpictura18.univ-amu.fr/en/notice/10256-newton-cenotaph-project-perspective-elevation-etienne-louis-boullee)
+
+The page uses [three.js](https://threejs.org/) (MIT), [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) (MIT) and Draco (Apache-2.0).
 
 Built 2026-10-25.
