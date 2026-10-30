@@ -22,6 +22,7 @@
   "tunnel_spring": 6.5,
   "v_bottom_half": 39.5,
   "v_top_half": 10.3,
+  "stair_block_y": -87.0,
   "cone_r_back": 72.0,
   "cone_r_front": 80.0,
   "tree_spacing_note": "about 3 m along each row, rows paired and staggered",

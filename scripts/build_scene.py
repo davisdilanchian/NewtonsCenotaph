@@ -27,10 +27,12 @@ D = dict(
     tier_R=82.0, tier_wall_top=62.6, tier_cornice_R=83.2, tier_top=64.0,
     stair_half_w=21.0, stair_inner_y=-139.0, stair_rise=0.5, stair_steps=11,
     tunnel_half_w=7.0, tunnel_spring=6.5,
-    v_bottom_half=39.5, v_top_half=10.3,        # upper-tier front V cut
+    v_bottom_half=39.5, v_top_half=10.3,        # front stair block: half-widths, base and top
+    stair_block_y=-87.0,                        # its front face
     cone_r_back=72.0, cone_r_front=80.0,        # drum front cut (cone on Y axis)
     tree_spacing_note="about 3 m along each row, rows paired and staggered",
 )
+DAIS_STEPS, DAIS_RISE, DAIS_TREAD, DAIS_STAIR_Y = 16, 0.25, 1.25, -31.0
 # Ten rows of cypress, measured from the plan (radius m, angular pitch rad,
 # half-angle of the front gap in degrees, ground z, phase offset).
 ROWS = []
@@ -526,43 +528,24 @@ def build():
     tier = mesh_obj("Upper tier", annulus(55, D["tier_R"], D["drum_top"] - 0.2, D["tier_wall_top"]), C_MON, M["dressed"])
     tc_ = mesh_obj("Upper tier cornice and terrace", annulus(55, D["tier_cornice_R"], D["tier_wall_top"], D["tier_top"]), C_MON, M["dressed"])
     tc_.data.materials.append(M["gravel"])
-    # V cut (trapezoid prism toward -Y)
-    vb, vt = D["v_bottom_half"], D["v_top_half"]
-    z0, z1 = D["drum_top"] - 0.3, D["tier_top"] + 6
-    slope = (vb - vt) / (D["tier_top"] - D["drum_top"])
-    def vx(z): return vb - slope * (z - D["drum_top"])
-    vbm = bmesh.new()
-    pts = [(-vx(z0), z0), (vx(z0), z0), (vx(z1), z1), (-vx(z1), z1)]
-    vv = [vbm.verts.new((x, y, z)) for y in (5.0, -100.0) for (x, z) in pts]
-    for f in [(0, 1, 2, 3), (7, 6, 5, 4), (0, 4, 5, 1), (1, 5, 6, 2), (2, 6, 7, 3), (3, 7, 4, 0)]:
-        vbm.faces.new([vv[i] for i in f])
-    bmesh.ops.recalc_face_normals(vbm, faces=vbm.faces)
-    vcut = temp_obj("cut_v", vbm)
     for ob in (tier, tc_):
         boolean(ob, sph71)
-        boolean(ob, vcut)
     for p in tc_.data.polygons:
         if p.normal.z > 0.9: p.material_index = 1
-    kill(vcut)
 
-    # V stairs: two flights climbing the cut edges from the bridge to the top tier
+    # Front stair block: a solid stepped mass against the tier. Its trapezoid is the
+    # elevation's central figure, its flanks are the two flights, and the plan's hatched
+    # band sits in front of the tier wall. Each course is one 0.5 m step.
+    vb, vt = D["v_bottom_half"], D["v_top_half"]
+    slope = (vb - vt) / (D["tier_top"] - D["drum_top"])
+    rise = 0.5
+    nsteps = int(round((D["tier_top"] - D["drum_top"]) / rise))
     vs = bmesh.new()
-    rise = 0.5; nsteps = int(round((D["tier_top"] - D["drum_top"]) / rise))
-    for s in (-1, 1):
-        for k in range(nsteps):
-            zt = D["drum_top"] + (k + 1) * rise
-            xe = vx(zt)
-            xa, xb = xe - 5.0, xe + 0.05
-            y_front = -math.sqrt(max(D["tier_R"] ** 2 - xb ** 2, 1)) - 0.5
-            dz = zt - CZ
-            y_back = -math.sqrt(max(R ** 2 - xa ** 2 - dz ** 2, 1)) + 2.0
-            x0, x1 = (xa, xb) if s > 0 else (-xb, -xa)
-            box(x0, x1, y_front, y_back, D["drum_top"] - 0.1, zt, vs)
-    mesh_obj("Upper stairs (V flights)", vs, C_MON, M["paving"])
-    # top landing between flights, carrying the funeral brazier
-    ld = box(-vt - 0.5, vt + 0.5, -D["tier_R"] - 0.5, -math.sqrt(R ** 2 - (D["tier_top"] - CZ) ** 2) + 2.0,
-             D["tier_wall_top"], D["tier_top"])
-    mesh_obj("Top landing", ld, C_MON, M["dressed"])
+    for k in range(nsteps):
+        zb = D["drum_top"] + k * rise
+        half = vb - slope * (zb + rise - D["drum_top"])
+        box(-half, half, D["stair_block_y"], -66.0, zb, zb + rise, vs)
+    mesh_obj("Front stair block", vs, C_MON, M["paving"])
 
     # --- sphere shell ---------------------------------------------------------
     sphere = mesh_obj("Sphere (Ø150 m shell)", uv_sphere(R, CZ, 384, 192), C_MON, M["sphere"])
@@ -588,9 +571,13 @@ def build():
     for i, (r_, h_) in enumerate([(26, 1.0), (18, 2.0), (11, 3.0), (6, 4.0)]):
         tmp = bpy.data.meshes.new("t"); a_ = annulus(0, r_, floor_z - 3, floor_z - 1.0 + h_, 128); a_.to_mesh(tmp); a_.free()
         dais.from_mesh(tmp); bpy.data.meshes.remove(tmp)
-    # ramp from the tunnel to the dais
-    box(-4, 4, -36, -18, D["platform_top"] - 0.5, D["platform_top"], dais)
     mesh_obj("Interior dais", dais, C_MON, M["dressed"])
+    # stair from the tunnel floor up to the sarcophagus, as in the section drawing
+    ds = bmesh.new()
+    for k in range(DAIS_STEPS):
+        box(-3.5, 3.5, DAIS_STAIR_Y + k * DAIS_TREAD, -5.0, D["platform_top"] - 0.5,
+            D["platform_top"] + DAIS_RISE * (k + 1), ds)
+    mesh_obj("Dais stair", ds, C_MON, M["paving"])
     sz = floor_z - 1.0 + 4.0
     sar = box(-1.4, 1.4, -2.6, 2.6, sz, sz + 0.5)
     box(-1.15, 1.15, -2.35, 2.35, sz + 0.5, sz + 1.8, sar)
@@ -598,12 +585,11 @@ def build():
     mesh_obj("Sarcophagus of Newton", sar, C_MON, M["dressed"])
 
     # bridge portal (small doorway on the drum terrace at the sphere)
-    pz = D["drum_top"]
-    py = -math.sqrt(R ** 2 - (pz + 3 - CZ) ** 2)
-    por = box(-3.2, 3.2, py - 2.6, py + 3, pz, pz + 6.4)
-    box(-3.8, 3.8, py - 3.0, py + 3, pz + 6.4, pz + 7.2, por)
+    pz, py = D["drum_top"], D["stair_block_y"]
+    por = box(-3.2, 3.2, py - 0.8, py + 0.2, pz, pz + 6.4)
+    box(-3.8, 3.8, py - 1.2, py + 0.2, pz + 6.4, pz + 7.2, por)
     mesh_obj("Bridge portal", por, C_MON, M["dressed"])
-    mesh_obj("Bridge portal door", box(-1.6, 1.6, py - 2.65, py - 2.0, pz, pz + 4.6), C_MON, M["dark"])
+    mesh_obj("Bridge portal door", box(-1.6, 1.6, py - 0.86, py - 0.7, pz, pz + 4.6), C_MON, M["dark"])
 
     # sphinx pedestals at the foot of the front opening
     ped = bmesh.new()
@@ -913,8 +899,8 @@ def build_figures(c, M):
     group(14, -190, 0.03, 4, 3)
     group(-6, -60, pt, 5, 4)           # before the tunnel
     group(10, -48, pt, 3, 2)
-    group(-14, -76, dt, 6, 3)          # on the bridge terrace
-    group(9, -76, dt, 4, 2)
+    group(-14, -96, dt, 6, 3)          # on the bridge terrace
+    group(9, -96, dt, 4, 2)
     group(-26, -300, 0.03, 3, 2); group(26, -420, 0.03, 4, 2)  # along the basin
     group(4.2, -3.5, CZ_floor() + 3.0, 2, 0.6)  # inside, beside the sarcophagus
 
@@ -976,7 +962,7 @@ def build_lights_cameras(c):
     cam("CAM_Elevation_ortho", (0, -1500, 83.2), (0, 0, 83.2), ortho=301.2)
     cam("CAM_Plan_ortho", (0, 0, 1500), (0, 0, 0), ortho=335.4)
     cam("CAM_Terrace_among_cypress", (-34.5, -100.2, D["drum_top"] + 1.65), (-55, -30, 75), 16)
-    cam("CAM_Interior_vault", (0, -13, 9.2), (0, 20, 42), 12)
+    cam("CAM_Interior_vault", (0, -13, 10.85), (0, 20, 42), 12)
     cam("CAM_Forecourt", (-62, -150, D["platform_top"] + 1.7), (0, -30, 44), 20)
     sc.camera = hero
 
