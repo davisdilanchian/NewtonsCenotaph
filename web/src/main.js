@@ -1,18 +1,18 @@
 import * as THREE from 'three';
 import { loadWorld, groundHeight, CENTER } from './world.js';
-import { Player, RADIUS, WALK } from './player.js';
-import { clamp, lerp } from './util.js';
+import { Player, RADIUS, WALK, RUN } from './player.js';
+import { clamp, lerp, SCALE } from './util.js';
 
 const $ = (id) => document.getElementById(id);
 const debug = new URLSearchParams(location.search).has('debug');
 const touch = matchMedia('(pointer: coarse)').matches;
 if (touch) document.body.classList.add('touch');
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: debug });
+const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true, powerPreference: 'high-performance', preserveDrawingBuffer: debug });
 renderer.setPixelRatio(Math.min(devicePixelRatio, touch ? 1.5 : 1.75));
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.8;
+renderer.toneMappingExposure = 0.84;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.shadowMap.autoUpdate = false;
@@ -20,21 +20,24 @@ document.body.prepend(renderer.domElement);
 const canvas = renderer.domElement;
 
 const FOV = 55;                                 // near natural vision; wider shrinks the sphere
-const camera = new THREE.PerspectiveCamera(FOV, innerWidth / innerHeight, 0.1, 24000);
+const camera = new THREE.PerspectiveCamera(FOV, innerWidth / innerHeight, 0.07, 24000);
+camera.layers.enable(1);                        // the sky seen through the vault, kept out of the basin's reflection
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
 
+const metres = (v) => `${Math.round(v * SCALE)} m`;
+
 // Places, as feet position and what you face on arrival.
 const PLACES = [
-  { name: 'The approach', note: 'Reflecting basin, 730 m out', at: [0, 0, 731], look: [0, 60, 0] },
-  { name: 'The main stair', note: '42 m wide', at: [0, 0, 172], look: [0, 40, 0] },
+  { name: 'The approach', note: `Reflecting basin, ${metres(730)} out`, at: [0, 0, 731], look: [0, 60, 0] },
+  { name: 'The main stair', note: `${metres(42)} wide`, at: [0, 0, 172], look: [0, 40, 0] },
   { name: 'The tunnel', note: 'The way in', at: [0, 5.5, 66], look: [0, 12, 0] },
   { name: 'Inside the sphere', note: 'Newton’s sarcophagus under the pierced vault', at: [0, 9.5, 8], look: [0, 12, -3] },
-  { name: 'The bridge', note: '46.5 m up, before the front stair block', at: [-20, 46.5, 104], look: [0, 50, 0] },
+  { name: 'The bridge', note: `${metres(46.5)} up, before the front stair block`, at: [-20, 46.5, 104], look: [0, 50, 0] },
   { name: 'The drum terrace', note: 'Four rows of cypress', at: [-66, 46.5, 64], look: [-94, 47, 0] },
-  { name: 'The upper tier', note: '64 m up, against the sphere', at: [-49, 64, 58.4], look: [40, 66, 70] },
+  { name: 'The upper tier', note: `${metres(64)} up, against the sphere`, at: [-49, 64, 58.4], look: [40, 66, 70] },
 ];
 
 // Boullée's six sheets on the title screen.
@@ -77,7 +80,7 @@ let world, player;
 const keys = new Set();
 const input = { x: 0, y: 0, run: false, jump: false };
 const touchMove = { x: 0, y: 0 };
-const EYE = 1.63;
+const EYE = 1.63 / SCALE;
 let inside = 0, time = 0, stride = 0, bob = 0, lodAt = new THREE.Vector2(1e9, 1e9), lodClock = 0, started = false;
 
 
@@ -100,9 +103,9 @@ function placeLabel(feet) {
   if (Math.abs(player.pos.x) < 7.5 && player.pos.z > 5 && player.pos.z < 46 && feet < 16) return PLACES[2];
   if (feet > 60) return PLACES[6];
   if (feet > 44) return r > 105 || Math.abs(player.pos.x) > 45 ? PLACES[5] : PLACES[4];
-  if (feet > 4.5 && r < 160) return { name: 'The ground terrace', note: 'Ø315 m, four rows of cypress' };
+  if (feet > 4.5 && r < 160) return { name: 'The ground terrace', note: `Ø${metres(315)}, four rows of cypress` };
   if (player.pos.z > 200 && Math.abs(player.pos.x) < 45) return PLACES[0];
-  return { name: 'The meadow', note: `${Math.round(r)} m from the sphere` };
+  return { name: 'The meadow', note: `${metres(r)} from the sphere` };
 }
 
 function look(dx, dy) {
@@ -120,13 +123,13 @@ function readInput() {
 function updateCamera(dt) {
   const p = player.pos, grounded = player.airTime < 0.12;
   stride = lerp(stride, grounded ? Math.min(1, player.speed / WALK) : 0, Math.min(1, dt * 10));
-  bob += dt * player.speed * 2.1;
+  bob += dt * Math.min(player.speed * SCALE, 9.5) * 2.1;
   camera.position.set(
-    p.x + Math.cos(player.yaw) * Math.cos(bob) * 0.012 * stride,
-    p.y - RADIUS + EYE + Math.abs(Math.sin(bob)) * 0.04 * stride - player.dip,
-    p.z - Math.sin(player.yaw) * Math.cos(bob) * 0.012 * stride);
+    p.x + Math.cos(player.yaw) * Math.cos(bob) * 0.012 / SCALE * stride,
+    p.y - RADIUS + EYE + Math.abs(Math.sin(bob)) * 0.04 / SCALE * stride - player.dip,
+    p.z - Math.sin(player.yaw) * Math.cos(bob) * 0.012 / SCALE * stride);
   camera.rotation.set(player.pitch, player.yaw, 0, 'YXZ');
-  const fov = FOV + clamp(player.speed - 4, 0, 6) * 0.8;
+  const fov = FOV + clamp((player.speed - WALK * 2) / (RUN - WALK * 2), 0, 1) * 4.8;
   if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = lerp(camera.fov, fov, Math.min(1, dt * 6)); camera.updateProjectionMatrix(); }
 }
 
@@ -162,12 +165,12 @@ function tick(dt) {
   const p = player.pos;
   const isIn = p.distanceTo(CENTER) < 67 || (Math.abs(p.x) < 8 && p.z > 0 && p.z < 46 && p.y < 16);
   inside = lerp(inside, isIn ? 1 : 0, Math.min(1, dt * 1.6));
-  world.scene.environmentIntensity = lerp(0.34, 0.03, inside);
+  world.scene.environmentIntensity = lerp(0.2, 0.03, inside);
   world.inner.intensity = 0.55 * inside;
-  renderer.toneMappingExposure = lerp(0.8, 2.0, inside);
-  world.bounce.intensity = lerp(0.62, 0.02, inside);
+  renderer.toneMappingExposure = lerp(0.84, 2.0, inside);
+  world.bounce.intensity = lerp(0.3, 0.02, inside);
   world.stars.visible = camera.position.distanceTo(CENTER) < 125;
-  world.stars.userData.points.material.uniforms.scale.value = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+  world.stars.userData.scale.value = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
 
   world.water.material.uniforms.time.value = time;
   world.sky.material.uniforms.time.value = time * 4;
@@ -242,6 +245,7 @@ async function start() {
   player = new Player({ bvh: world.bvh, groundHeight, treeHash: world.trees.hash });
   bindControls();
 
+  $('about').textContent = `Étienne-Louis Boullée drew this sphere for Isaac Newton in 1784. It was never built. Published accounts make it 150 m across; here it stands ${metres(150)} wide, with every terrace and all 2,139 cypresses from his drawings.`;
   arrive(PLACES[0]);
   world.trees.updateLOD(1e6, 1e6, 75);          // every tree in the shadow map
   world.fire.update(0.016, 0);

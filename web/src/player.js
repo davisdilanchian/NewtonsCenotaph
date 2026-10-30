@@ -1,9 +1,10 @@
 // Capsule character controller over a triangle BVH, with an analytic ground and cylinder
 // trees. The collision step follows the three-mesh-bvh character example (MIT).
 import * as THREE from 'three';
+import { SCALE } from './util.js';
 
-export const RADIUS = 0.32, HEIGHT = 1.75, WALK = 2.2;
-const GRAVITY = 22, JUMP = 6.4, RUN = 9.5, WORLD_R = 790, SUBSTEPS = 4;
+export const RADIUS = 0.32 / SCALE, HEIGHT = 1.75 / SCALE, WALK = 2.2 / SCALE, RUN = 9.5 / Math.sqrt(SCALE);
+const GRAVITY = 22 / SCALE, JUMP = 6.4 / SCALE, WORLD_R = 790, SUBSTEPS = 4;
 
 const box = new THREE.Box3(), seg = new THREE.Line3(), triPt = new THREE.Vector3(), capPt = new THREE.Vector3();
 const delta = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
@@ -47,7 +48,7 @@ export class Player {
     this.bounds();
 
     this.speed = Math.hypot(this.pos.x - start.x, this.pos.z - start.z) / Math.max(dt, 1e-4);
-    if (this.grounded && this.airTime > 0.3) this.dip = Math.min(0.2, this.airTime * 0.12);   // knees take the landing
+    if (this.grounded && this.airTime > 0.3) this.dip = Math.min(0.2, this.airTime * 0.12) / SCALE;   // knees take the landing
     this.dip *= Math.exp(-dt * 9);
     this.airTime = this.grounded ? 0 : this.airTime + dt;
     if (this.pos.y < -30) this.place({ x: 0, y: 0, z: 190 });

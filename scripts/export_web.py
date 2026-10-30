@@ -39,7 +39,7 @@ cols = [ramp_mesh("COL_main_stair", [[(-sh, y_low - 0.6, 0), (sh, y_low - 0.6, 0
                                      [(-sh, y_high, top), (sh, y_high, top), (sh, D["stair_inner_y"] + 0.5, top), (-sh, D["stair_inner_y"] + 0.5, top)]])]
 
 # front stair block: one solid slope per flank, wall to front face
-vb, vt, yf, yb = D["v_bottom_half"], D["v_top_half"], D["stair_block_y"], -66.0
+vb, vt, yf, yb = D["v_bottom_half"], D["v_top_half"], D["stair_block_y"], D["stair_block_back"]
 z0, z1 = D["drum_top"] - 0.1, D["tier_top"]
 corners = lambda y: [(-vb, y, z0), (vb, y, z0), (vt, y, z1), (-vt, y, z1)]
 f, b = corners(yf), corners(yb)
@@ -57,7 +57,7 @@ cols.append(ramp_mesh("COL_dais_stair", [[(-3.5, y0, top), (3.5, y0, top), (3.5,
                                          [(-3.5, y1, z1), (3.5, y1, z1), (3.5, -5.0, z1), (-3.5, -5.0, z1)]]))
 
 # what the page draws
-extra = ["Sphinxes", "Funeral brazier", "Esplanade and walks", "Basin coping"]
+extra = ["Lions", "Funeral brazier", "Esplanade and walks", "Basin coping"]
 bpy.ops.object.select_all(action="DESELECT")
 keep = [o for o in col.objects if o.type == "MESH"] + [bpy.data.objects[n] for n in extra]
 for ob in keep:

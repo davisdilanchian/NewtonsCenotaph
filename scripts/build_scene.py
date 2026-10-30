@@ -10,7 +10,7 @@ Front of the monument (main stair, entrance tunnel) faces -Y.
 All dimensions come from the BnF drawings (plan, elevation, section),
 scaled so the sphere is 150 m in diameter. See docs/README.md.
 """
-import bpy, bmesh, math, random, json, os
+import bpy, bmesh, math, random, json, os, mathutils
 from mathutils import Vector, Matrix
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -25,14 +25,14 @@ D = dict(
     drum_R=118.9, drum_wall_top=43.0, drum_frieze_R=119.3,
     drum_dentil_R=120.2, drum_corona_R=121.0, drum_top=46.5,
     tier_R=82.0, tier_wall_top=62.6, tier_cornice_R=83.2, tier_top=64.0,
-    stair_half_w=21.0, stair_inner_y=-139.0, stair_rise=0.5, stair_steps=11,
+    stair_half_w=21.0, stair_inner_y=-139.0, stair_rise=0.1, stair_steps=55,
     tunnel_half_w=7.0, tunnel_spring=6.5,
     v_bottom_half=39.5, v_top_half=10.3,        # front stair block: half-widths, base and top
-    stair_block_y=-87.0,                        # its front face
+    stair_block_y=-87.0, stair_block_back=-70.0,  # its front face, and its back, buried in the shell
     cone_r_back=72.0, cone_r_front=80.0,        # drum front cut (cone on Y axis)
     tree_spacing_note="about 3 m along each row, rows paired and staggered",
 )
-DAIS_STEPS, DAIS_RISE, DAIS_TREAD, DAIS_STAIR_Y = 16, 0.25, 1.25, -31.0
+DAIS_STEPS, DAIS_RISE, DAIS_TREAD, DAIS_STAIR_Y = 40, 0.1, 0.5, -31.0
 # Ten rows of cypress, measured from the plan (radius m, angular pitch rad,
 # half-angle of the front gap in degrees, ground z, phase offset).
 ROWS = []
@@ -489,7 +489,7 @@ def build():
     # assign paving to top faces
     for p in plat.data.polygons:
         if p.normal.z > 0.9: p.material_index = 1
-    # main stair (11 risers × 0.5 m)
+    # main stair
     st = bmesh.new()
     n = D["stair_steps"]; run = (D["stair_inner_y"] - (-D["platform_R"] - 0.5)) / n
     for i in range(n):
@@ -538,13 +538,13 @@ def build():
     # band sits in front of the tier wall. Each course is one 0.5 m step.
     vb, vt = D["v_bottom_half"], D["v_top_half"]
     slope = (vb - vt) / (D["tier_top"] - D["drum_top"])
-    rise = 0.5
+    rise = D["stair_rise"]
     nsteps = int(round((D["tier_top"] - D["drum_top"]) / rise))
     vs = bmesh.new()
     for k in range(nsteps):
         zb = D["drum_top"] + k * rise
         half = vb - slope * (zb + rise - D["drum_top"])
-        box(-half, half, D["stair_block_y"], -66.0, zb, zb + rise, vs)
+        box(-half, half, D["stair_block_y"], D["stair_block_back"], zb, zb + rise, vs)
     mesh_obj("Front stair block", vs, C_MON, M["paving"])
 
     # --- sphere shell ---------------------------------------------------------
@@ -591,34 +591,22 @@ def build():
     mesh_obj("Bridge portal", por, C_MON, M["dressed"])
     mesh_obj("Bridge portal door", box(-1.6, 1.6, py - 0.86, py - 0.7, pz, pz + 4.6), C_MON, M["dark"])
 
-    # sphinx pedestals at the foot of the front opening
+    # lion pedestals at the foot of the front opening
     ped = bmesh.new()
     for s in (-1, 1):
         box(s * 25.0 if s > 0 else -61.0, 61.0 if s > 0 else -25.0, -125.0, -118.0, D["platform_top"], D["platform_top"] + 3.4, ped)
-    mesh_obj("Sphinx pedestals", ped, C_MON, M["dressed"])
-    sph_bm = bmesh.new()
-    def blob(bm, center, size, segs=16):
-        t = bmesh.new()
-        bmesh.ops.create_uvsphere(t, u_segments=segs, v_segments=segs // 2, radius=1.0)
-        bmesh.ops.transform(t, matrix=Matrix.Translation(center) @ Matrix.Diagonal((*size, 1)), verts=t.verts)
-        tmp = bpy.data.meshes.new("t"); t.to_mesh(tmp); t.free(); bm.from_mesh(tmp); bpy.data.meshes.remove(tmp)
-    def sphinx(x, y, z, bm):
-        # recumbent sphinx, ≈ 5.5 m long, facing -Y (local +X is the head end)
-        loc = bmesh.new()
-        for c_, s_ in [((-0.6, 0, 0.75), (2.0, 0.78, 0.72)),      # body
-                       ((-1.9, 0, 0.7), (0.9, 0.85, 0.75)),       # haunches
-                       ((1.9, 0.38, 0.18), (1.0, 0.2, 0.18)),     # fore paws
-                       ((1.9, -0.38, 0.18), (1.0, 0.2, 0.18)),
-                       ((1.1, 0, 1.25), (0.55, 0.62, 0.8)),       # chest
-                       ((1.25, 0, 2.15), (0.42, 0.4, 0.48)),      # head
-                       ((1.05, 0, 2.0), (0.38, 0.62, 0.62)),      # nemes headdress
-                       ((-2.7, 0.5, 0.15), (0.6, 0.12, 0.12))]:   # tail
-            blob(loc, c_, s_)
-        bmesh.ops.transform(loc, matrix=Matrix.Translation((x, y, z)) @ Matrix.Rotation(math.radians(-90), 4, "Z"), verts=loc.verts)
-        tmp = bpy.data.meshes.new("t"); loc.to_mesh(tmp); loc.free(); bm.from_mesh(tmp); bpy.data.meshes.remove(tmp)
+    mesh_obj("Lion pedestals", ped, C_MON, M["dressed"])
+    # recumbent lions on the pedestals, facing out; the drawings show them only as small dark shapes
+    lion = lion_mesh()
+    lions = bmesh.new()
     for x in (-47.6, -27.4, 27.4, 47.6):
-        sphinx(x, -121.5, D["platform_top"] + 3.4, sph_bm)
-    mesh_obj("Sphinxes", sph_bm, C_FIG, M["dressed"], smooth=True)
+        before = len(lions.verts)
+        lions.from_mesh(lion)
+        lions.verts.ensure_lookup_table()
+        bmesh.ops.transform(lions, matrix=Matrix.Translation((x, -121.5, D["platform_top"] + 3.4)) @ Matrix.Rotation(math.radians(-90), 4, "Z"),
+                            verts=lions.verts[before:])
+    bpy.data.meshes.remove(lion)
+    mesh_obj("Lions", lions, C_FIG, M["dressed"], smooth=True)
 
     # brazier with fire on the top landing (the smoke in Boullée's elevation)
     bz = D["tier_top"]; by = -D["tier_R"] + 4
@@ -871,6 +859,112 @@ def build_landscape(c, M, variants):
                 s = rnd.uniform(0.95, 1.05); ob.scale = (s, s, s)
                 al.objects.link(ob)
                 y -= 6.0
+
+def lion_mesh(name="lion"):
+    """Couchant lion from primitives merged by voxel remesh, then carved. Forward +X, up +Z, feet at z=0, about 4 m long and 2.3 m tall."""
+    bm = bmesh.new()
+
+    def ell(c, r, rot=None):
+        t = bmesh.ops.create_uvsphere(bm, u_segments=20, v_segments=12, radius=1.0)
+        m = Matrix.Translation(c) @ (rot or Matrix.Identity(4)) @ Matrix.Diagonal((*r, 1))
+        bmesh.ops.transform(bm, matrix=m, verts=t["verts"])
+
+    def sweep(pts):
+        """Smooth limb through (x, y, z, radius) points."""
+        pts = [pts[0]] + pts + [pts[-1]]
+        for i in range(1, len(pts) - 2):
+            p0, p1, p2, p3 = [Vector(p) for p in pts[i - 1:i + 3]]
+            n = max(2, int((p2.xyz - p1.xyz).length / 0.05))
+            for k in range(n):
+                t = k / n
+                q = 0.5 * (2 * p1 + (p2 - p0) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t ** 2 + (3 * p1 - p0 - 3 * p2 + p3) * t ** 3)
+                ell(q.xyz, (q.w, q.w, q.w))
+
+    # body
+    sweep([(-1.3, 0, 0.66, 0.6), (-0.45, 0, 0.72, 0.68), (0.45, 0, 0.82, 0.68), (0.8, 0, 0.98, 0.58)])
+    for s in (-1, 1):
+        ell((-1.25, s * 0.5, 0.52), (0.76, 0.34, 0.52))                                     # haunch
+        sweep([(-1.0, s * 0.72, 0.3, 0.24), (-0.45, s * 0.8, 0.17, 0.16), (-0.05, s * 0.8, 0.13, 0.13)])   # hind leg
+        ell((0.18, s * 0.8, 0.12), (0.3, 0.2, 0.12))
+        ell((0.42, s * 0.34, 1.1), (0.46, 0.2, 0.42))                                       # shoulder
+        sweep([(0.62, s * 0.5, 0.68, 0.32), (0.56, s * 0.54, 0.26, 0.21), (1.2, s * 0.44, 0.17, 0.155), (1.72, s * 0.42, 0.15, 0.15)])   # foreleg
+        ell((1.95, s * 0.42, 0.13), (0.27, 0.2, 0.13))
+        for k, dy in enumerate((-0.135, -0.045, 0.045, 0.135)):
+            ell((2.19 - abs(dy) * 0.4, s * 0.42 + dy, 0.09), (0.09, 0.05, 0.08))            # toes
+
+    # neck, mane and head
+    sweep([(0.72, 0, 1.08, 0.56), (1.02, 0, 1.6, 0.46)])
+    ell((1.0, 0, 1.62), (0.56, 0.64, 0.76))
+    ell((1.1, 0, 1.08), (0.42, 0.5, 0.56))
+    ell((1.38, 0, 1.86), (0.36, 0.33, 0.32))                                                # skull
+    ell((1.64, 0, 1.73), (0.27, 0.25, 0.19))                                                # muzzle
+    ell((1.66, 0, 1.58), (0.2, 0.18, 0.08))                                                 # chin
+    sweep([(1.42, 0, 2.03, 0.14), (1.66, 0, 1.92, 0.12), (1.84, 0, 1.8, 0.1)])              # broad nose
+    ell((0.98, 0, 1.72), (0.3, 0.74, 0.82))                                                 # ruff framing the face
+    for s in (-1, 1):
+        ell((1.54, s * 0.19, 1.99), (0.14, 0.1, 0.05))                                      # brow
+        ell((1.15, s * 0.31, 2.17), (0.09, 0.12, 0.14))                                     # ear
+        ell((1.72, s * 0.12, 1.71), (0.16, 0.13, 0.12))                                     # whisker pad
+
+    # tail, curled round the near flank
+    sweep([(-1.85, 0.2, 0.55, 0.15), (-1.98, 0.62, 0.2, 0.115), (-1.55, 1.02, 0.11, 0.095), (-0.8, 1.1, 0.1, 0.085), (-0.15, 1.12, 0.1, 0.08)])
+    ell((0.1, 1.13, 0.12), (0.28, 0.13, 0.12))
+
+    src = bpy.data.meshes.new(name + "_src"); bm.to_mesh(src); bm.free()
+    ob = bpy.data.objects.new(name + "_src", src); bpy.context.collection.objects.link(ob)
+    r = ob.modifiers.new("r", "REMESH"); r.mode = "VOXEL"; r.voxel_size = 0.026; r.use_smooth_shade = True
+    sm = ob.modifiers.new("s", "SMOOTH"); sm.factor = 0.6; sm.iterations = 12
+    dg = bpy.context.evaluated_depsgraph_get()
+    me = bpy.data.meshes.new_from_object(ob.evaluated_get(dg))
+    bpy.data.objects.remove(ob); bpy.data.meshes.remove(src)
+
+    # carve: mane locks, eyes, nostrils and mouth, by pushing along the normals
+    bm = bmesh.new(); bm.from_mesh(me); bm.normal_update()
+    axis0, axis1 = Vector((0.55, 0, 0.95)), Vector((1.25, 0, 1.95))
+    def dent(p, c, r):
+        d = (p - Vector(c)).length
+        return max(0.0, 1 - (d / r) ** 2) ** 2
+    moves = []
+    for v in bm.verts:
+        p, d = v.co, 0.0
+        # mane: over neck and chest, stopping at the face
+        ax = (axis1 - axis0).normalized()
+        along = (p - axis0).dot(ax)
+        off = p - axis0 - ax * along
+        rad = off.length
+        face = max(0.0, min(1.0, (p.x - 1.28) / 0.14))
+        low = max(0.0, min(1.0, (rad - 0.3) / 0.14))
+        mask = low * (1 - face) * max(0.0, min(1.0, (along + 0.75) / 0.3)) * max(0.0, min(1.0, (p.x - 0.28) / 0.28))
+        if mask > 0 and p.z > 0.42:
+            a = math.atan2(off.y, off.z + 1e-6)
+            warp = 1.6 * mathutils.noise.noise(p * 2.2)
+            lock = abs(math.sin(a * 16 + along * 2.6 + warp * 1.4))
+            wave = 0.5 + 0.5 * math.sin(along * 11 + a * 5 + warp * 2)
+            d += mask * (0.06 * (lock ** 0.5 - 0.5) + 0.018 * wave)
+        for s in (-1, 1):
+            d -= 0.06 * dent(p, (1.66, s * 0.2, 1.905), 0.085)     # eye socket
+            d += 0.028 * dent(p, (1.68, s * 0.2, 1.9), 0.04)       # eyeball
+            d -= 0.035 * dent(p, (1.9, s * 0.07, 1.745), 0.045)    # nostril
+            d -= 0.07 * dent(p, (1.15, s * 0.32, 2.14), 0.07)      # ear hollow
+        if abs(p.y) < 0.2 and 1.62 < p.z < 1.68 and p.x > 1.62:
+            d -= 0.035 * max(0.0, min(1.0, (p.x - 1.62) / 0.1)) * (1 - abs(p.z - 1.65 - 0.1 * abs(p.y)) / 0.03 if abs(p.z - 1.65 - 0.1 * abs(p.y)) < 0.03 else 0)   # mouth line
+        if p.x > 1.7 and abs(p.y) < 0.03 and 1.6 < p.z < 1.72:
+            d -= 0.02                                              # groove below the nose
+        moves.append(d)
+    for v, d in zip(bm.verts, moves):
+        v.co += v.normal * d
+    bm.to_mesh(me); bm.free()
+
+    ob = bpy.data.objects.new(name, me); bpy.context.collection.objects.link(ob)
+    dm = ob.modifiers.new("d", "DECIMATE"); dm.ratio = 1.0
+    dg = bpy.context.evaluated_depsgraph_get()
+    n = len(me.polygons)
+    dm.ratio = min(1.0, 14000 / max(sum(len(p.vertices) - 2 for p in me.polygons), 1))
+    dg.update()
+    out = bpy.data.meshes.new_from_object(ob.evaluated_get(dg))
+    bpy.data.objects.remove(ob); bpy.data.meshes.remove(me)
+    out.name = name
+    return out
 
 def build_figures(c, M):
     """Human figures (1.75 m) for scale, placed like those in Boullée's drawings."""
