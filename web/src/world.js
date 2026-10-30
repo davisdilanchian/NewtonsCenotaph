@@ -24,7 +24,7 @@ export function groundHeight(x, z) {
   return (Math.sin(x * 0.0021 + 1.3) * Math.cos(y * 0.0017 - 0.4) + 0.6 * Math.sin(x * 0.0047 + y * 0.0031)) * 70 * k ** 1.4;
 }
 
-const NOT_SOLID = new Set(['Main stair', 'Front stair block', 'Dais stair', 'Planting beds', 'Lions', 'Funeral brazier',
+const NOT_SOLID = new Set(['Main stair', 'Front stair block', 'Planting beds', 'Lions', 'Funeral brazier',
                            'Esplanade and walks', 'Drum dentils', 'Bridge portal door']);
 
 // ------------------------------------------------------------------ texturing
@@ -97,108 +97,88 @@ function stoneUVs(source, tile, sphere) {
   return g;
 }
 
-function vaultMaterial() {
+/** Bore walls catch the sky, so a hole stays a point of daylight from anywhere on the floor. */
+function boreMaterial() {
   return new THREE.ShaderMaterial({
-    side: THREE.DoubleSide,
-    vertexShader: `varying vec3 vDir; void main(){ vDir = position - vec3(0.0, 73.5, 0.0); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-    fragmentShader: `varying vec3 vDir;
-      void main(){ vec3 d = normalize(vDir);
-        float band = exp(-pow(dot(d, normalize(vec3(0.35, 0.76, -0.55))) / 0.11, 2.0));
-        float mott = 0.6 + 0.4 * sin(d.x * 19.0 + sin(d.y * 13.0) * 2.0) * sin(d.z * 17.0 + d.y * 9.0);
-        gl_FragColor = vec4(vec3(0.006, 0.008, 0.014) + band * mott * vec3(0.008, 0.009, 0.012), 1.0);
-        #include <tonemapping_fragment>
-        #include <colorspace_fragment>
-      }`,
+    vertexShader: `varying float vR; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vR = distance(w.xyz, vec3(0.0, 73.5, 0.0)); gl_Position = projectionMatrix * viewMatrix * w; }`,
+    fragmentShader: `varying float vR; void main(){ float t = smoothstep(66.5, 74.0, vR);
+      vec3 c = mix(vec3(0.1, 0.13, 0.2), vec3(1.5, 1.7, 2.0), t * t);
+      if (distance(cameraPosition, vec3(0.0, 73.5, 0.0)) > 72.0) c = vec3(0.03, 0.027, 0.025);
+      gl_FragColor = vec4(c, 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`,
   });
 }
 
 /**
- * Boullée's pierced vault. Every star is an opening: the points mark themselves in the stencil
- * buffer and a second sky is drawn only there, so the real sky and its clouds show through.
- * The bores are taken as funnels widening inward, which keeps them open from anywhere on the floor.
+ * Daylight inside the sphere. The openings are real holes in the shell, so the sky needs no help;
+ * this adds what the air does with the sun: shafts crossing the void and the pools where they land.
  */
-function starVault(sky) {
-  const group = new THREE.Group(), r = rng(1784), N = 5200, R = 66.8, OUTER = 75.03;
-  const pos = new Float32Array(N * 3), size = new Float32Array(N), bandN = new THREE.Vector3(0.35, 0.76, -0.55).normalize(), v = new THREE.Vector3();
-  const spot = [], spotSize = [];
-  let i = 0;
-  while (i < N) {
-    v.set(r() * 2 - 1, r() * 2 - 1, r() * 2 - 1);
-    if (v.lengthSq() > 1 || v.lengthSq() < 0.01) continue;
-    v.normalize();
-    const inBand = Math.abs(v.dot(bandN)) < 0.11, odds = inBand ? 1 : 0.2;
-    if (r() > odds || v.y < -0.72) continue;
-    pos.set([v.x * R + CENTER.x, v.y * R + CENTER.y, v.z * R + CENTER.z], i * 3);
-    size[i] = 0.16 + 0.62 * r() ** 5 + (inBand ? 0 : 0.08);
-    const toSun = v.dot(SUN);                // sunlight falls through the holes facing it, onto the far wall
-    if (toSun > 0.86) {
-      const h = v.clone().addScaledVector(SUN, -2 * toSun);
-      spot.push(h.x * R + CENTER.x, h.y * R + CENTER.y, h.z * R + CENTER.z); spotSize.push(size[i] * 1.5);
-    }
-    i++;
+function vaultLight(buffer) {
+  const group = new THREE.Group(), R = 66.9;
+  const n = new Uint32Array(buffer, 0, 1)[0], data = new Float32Array(buffer, 4, n * 4);
+  const scale = { value: 800 }, d = new THREE.Vector3(), from = [], to = [], width = [], spot = [], spotSize = [], glint = [], glintSize = [];
+  for (let i = 0; i < n; i++) {
+    d.fromArray(data, i * 4);
+    const r = data[i * 4 + 3], toSun = d.dot(SUN);
+    glint.push(d.x * R + CENTER.x, d.y * R + CENTER.y, d.z * R + CENTER.z); glintSize.push(r * 2);
+    if (toSun < 0.9) continue;
+    const a = d.clone().multiplyScalar(R).add(CENTER), b = d.clone().addScaledVector(SUN, -2 * toSun).multiplyScalar(R).add(CENTER);
+    from.push(a.x, a.y, a.z); to.push(b.x, b.y, b.z); width.push(r * 1.7);
+    spot.push(b.x, b.y, b.z); spotSize.push(r * 2.2);
   }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  g.setAttribute('size', new THREE.BufferAttribute(size, 1));
-  g.boundingSphere = new THREE.Sphere(CENTER, 80);
 
-  const scale = { value: 800 };
+  const shafts = new THREE.InstancedBufferGeometry();
+  shafts.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, 0, 0, 0.5, 0, 0, -0.5, 1, 0, 0.5, 1, 0], 3));
+  shafts.setIndex([0, 1, 3, 0, 3, 2]);
+  shafts.setAttribute('from', new THREE.InstancedBufferAttribute(new Float32Array(from), 3));
+  shafts.setAttribute('to', new THREE.InstancedBufferAttribute(new Float32Array(to), 3));
+  shafts.setAttribute('width', new THREE.InstancedBufferAttribute(new Float32Array(width), 1));
+  shafts.instanceCount = width.length;
+  const beams = new THREE.Mesh(shafts, new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    vertexShader: `attribute vec3 from, to; attribute float width; varying vec2 vP;
+      void main(){ vec3 p = mix(from, to, position.y), axis = normalize(to - from), side = normalize(cross(axis, cameraPosition - p));
+        vP = vec2(position.x * 2.0, position.y); gl_Position = projectionMatrix * viewMatrix * vec4(p + side * position.x * width, 1.0); }`,
+    fragmentShader: `varying vec2 vP; void main(){ float e = 1.0 - vP.x * vP.x;
+      gl_FragColor = vec4(vec3(1.0, 0.86, 0.66) * e * e * (0.075 - 0.04 * vP.y), 1.0); }`,
+  }));
+  beams.frustumCulled = false;
+
   // sprites stand flat while the wall curves behind them, so their depth is pulled off the wall
-  const place = (grow, pull) => `attribute float size; uniform float scale; varying float vA;
-    void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); float px = size * scale / -mv.z;
-      gl_PointSize = max(1.6, px) * ${grow}; vA = min(1.0, px / 1.6);
-      gl_Position = projectionMatrix * mv;
-      vec4 lifted = projectionMatrix * (mv + vec4(0.0, 0.0, ${pull}, 0.0));
-      gl_Position.z = lifted.z / lifted.w * gl_Position.w; }`;
-
-  const opening = { colorWrite: false, depthWrite: false, transparent: true, stencilWrite: true, stencilRef: 1,
-                    stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp };
-  const holes = new THREE.Points(g, new THREE.ShaderMaterial({ ...opening, uniforms: { scale }, vertexShader: place('1.0', '1.8'),
-    fragmentShader: 'void main(){ if (length(gl_PointCoord - 0.5) > 0.5) discard; gl_FragColor = vec4(1.0); }' }));
-  const moon = new THREE.Mesh(new THREE.CircleGeometry(1.9, 40), new THREE.MeshBasicMaterial({ ...opening, fog: false }));
-  const dir = new THREE.Vector3(-0.45, 0.82, -0.35).normalize();
-  moon.position.copy(CENTER).addScaledVector(dir, R - 0.1);
-  moon.lookAt(CENTER);
-
-  const through = new THREE.Mesh(sky.geometry, sky.material.clone());
-  through.material.uniforms = sky.material.uniforms;
-  Object.assign(through.material, { depthTest: false, depthWrite: false, transparent: true, toneMapped: false,   // true daylight colour, whatever the eye has adapted to indoors
-                                    stencilWrite: true, stencilRef: 1, stencilFunc: THREE.EqualStencilFunc });
-  through.scale.copy(sky.scale);
-  through.frustumCulled = false;
-  through.renderOrder = 2;
-
-  // daylight spilling round each rim, which also softens the stencil's hard edge
-  const halo = new THREE.Points(g, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { scale },
-    vertexShader: place('2.6', '1.8'),
-    fragmentShader: `varying float vA; void main(){ float d = length(gl_PointCoord - 0.5) * 2.0;
-      gl_FragColor = vec4(vec3(0.6, 0.76, 1.0) * exp(-d * d * 9.0) * (0.08 + 0.1 * vA), 1.0); }` }));
-  halo.renderOrder = 3;
-
-  const sg = new THREE.BufferGeometry();
-  sg.setAttribute('position', new THREE.Float32BufferAttribute(spot, 3));
-  sg.setAttribute('size', new THREE.Float32BufferAttribute(spotSize, 1));
-  sg.boundingSphere = g.boundingSphere;
-  const sunspots = new THREE.Points(sg, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { scale },
-    vertexShader: place('1.0', '1.8'),
-    fragmentShader: `void main(){ float d = length(gl_PointCoord - 0.5) * 2.0;
-      gl_FragColor = vec4(vec3(1.0, 0.82, 0.58) * smoothstep(1.0, 0.7, d) * 0.5, 1.0); }` }));
-  sunspots.renderOrder = 3;
-
-  for (const o of [holes, moon, through, halo, sunspots]) { o.layers.set(1); group.add(o); }
-  for (const o of [holes, halo, sunspots]) o.frustumCulled = false;
+  const points = (positions, sizes, glsl, grow = '1.0') => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    g.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
+    const pts = new THREE.Points(g, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { scale },
+      vertexShader: `attribute float size; uniform float scale;
+        void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = max(1.5, size * scale / -mv.z) * ${grow};
+          gl_Position = projectionMatrix * mv;
+          vec4 lifted = projectionMatrix * (mv + vec4(0.0, 0.0, 1.8, 0.0)); gl_Position.z = lifted.z / lifted.w * gl_Position.w; }`,
+      fragmentShader: glsl }));
+    pts.frustumCulled = false;
+    return pts;
+  };
+  group.add(beams,
+    points(spot, spotSize, `void main(){ float d = length(gl_PointCoord - 0.5) * 2.0;
+      gl_FragColor = vec4(vec3(1.0, 0.8, 0.55) * smoothstep(1.0, 0.5, d) * 0.2, 1.0); }`),
+    points(glint, glintSize, `void main(){ float d = length(gl_PointCoord - 0.5) * 2.0;
+      gl_FragColor = vec4(vec3(0.55, 0.72, 1.0) * exp(-d * d * 6.0) * 0.13, 1.0); }`, '2.4'));
+  // the luminous mist round the sarcophagus in Boullée's section
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d'), g = x.createRadialGradient(64, 64, 2, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,.5)'); g.addColorStop(0.5, 'rgba(255,255,255,.14)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  const map = new THREE.CanvasTexture(c), r = rng(9);
+  for (let i = 0; i < 22; i++) {
+    const m = new THREE.Sprite(new THREE.SpriteMaterial({ map, color: 0x9fb0c4, transparent: true, depthWrite: false, opacity: 0.05 + r() * 0.05, blending: THREE.AdditiveBlending, fog: false }));
+    const a = r() * Math.PI * 2, far = 8 + r() * 30, size = 30 + r() * 42;
+    m.position.set(Math.cos(a) * far, 11 + r() * 5, Math.sin(a) * far); m.scale.set(size * 1.5, size * 0.32, 1);
+    group.add(m);
+  }
   group.userData.scale = scale;
-
-  // the same openings seen from outside, as small dark bores in the shell
-  const outer = new THREE.Points(g, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, uniforms: { scale },
-    vertexShader: `attribute float size; uniform float scale; varying float vA;
-      void main(){ vec3 p = (position - vec3(0.0, 73.5, 0.0)) * ${(OUTER / R).toFixed(5)} + vec3(0.0, 73.5, 0.0);
-        vec4 mv = modelViewMatrix * vec4(p, 1.0); float px = size * 0.45 * scale / -mv.z; gl_PointSize = max(1.0, px); vA = min(1.0, px);
-        gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `varying float vA; void main(){ float d = length(gl_PointCoord - 0.5) * 2.0; if (d > 1.0) discard;
-      gl_FragColor = vec4(0.05, 0.045, 0.04, smoothstep(1.0, 0.7, d) * vA * 0.85); }` }));
-  outer.frustumCulled = false;
-  return { group, outer };
+  return group;
 }
 
 // ----------------------------------------------------------------- vegetation
@@ -469,7 +449,7 @@ function makeFire() {
 
 function makeVisitors(scene) {
   const r = rng(5), spots = [[-8, 5.5, 132, 5], [9, 5.5, 136, 3], [-6, 5.5, 60, 4], [11, 5.5, 50, 3], [-14, 46.5, 96, 4], [10, 46.5, 98, 3],
-                             [-17, 0, 178, 4], [15, 0, 188, 3], [-26, 0, 310, 2], [26, 0, 430, 3], [3.2, 9.5, 2.5, 2], [-24, 5.5, 150, 2],
+                             [-17, 0, 178, 4], [15, 0, 188, 3], [-26, 0, 310, 2], [26, 0, 430, 3], [3.2, 9.5, 2.5, 2], [-24, 5.5, 150, 2], [-11, 9.5, -4, 4], [13, 9.5, 8, 4], [-8, 9.5, 12, 3], [15, 9.5, -12, 3],
                              [-30, 5.5, 140, 5], [34, 5.5, 128, 4], [0, 0, 198, 6], [6, 64, 73, 3], [-22, 46.5, 92, 3], [24, 0, 640, 3], [-27, 0, 560, 2]];
   const black = new THREE.MeshBasicMaterial({ color: 0x0b0c0f }), list = [];
   for (const g of figureGeometries()) {
@@ -500,6 +480,7 @@ export async function loadWorld(renderer, onProgress) {
   const stone = T('stone', true), stoneN = T('stone_n');
   const dressed = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.5), roughness: 0.74 }), { streaks: 0.4 });
   const sphere = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.25), roughness: 0.72, envMapIntensity: 0.45 }), { courses: true });
+  const vault = weathered(std({ color: 0x8a8173, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.9, envMapIntensity: 0.2, dithering: true }), { courses: true, streaks: 0.6 });
   const paving = weathered(std({ color: LIMESTONE, map: T('paving', true), normalMap: T('paving_n'), normalScale: nS(0.7) }), { streaks: 0 });
   const gravel = weathered(std({ color: new THREE.Color(1.7, 1.52, 1.24), map: T('gravel', true), normalMap: T('gravel_n'), normalScale: nS(0.5), roughness: 0.94 }), { streaks: 0 });
   const soil = std({ map: T('soil', true), roughness: 0.97 });
@@ -507,14 +488,14 @@ export async function loadWorld(renderer, onProgress) {
   const sprays = std({ map: sprayTexture(renderer), alphaTest: 0.42, vertexColors: true, roughness: 0.9 });
   const grass = [T('grass', true), T('grass_n')];
   const MATS = {
-    'Limestone ashlar': [ashlar, 15.6 / SCALE], 'Limestone dressed': [dressed, 12 / SCALE], 'Limestone sphere': [sphere, 12, true],
+    'Vault: pierced shell (star holes)': [vault, 12, true], 'Limestone ashlar': [ashlar, 15.6 / SCALE], 'Limestone dressed': [dressed, 12 / SCALE], 'Limestone sphere': [sphere, 12, true],
     'Limestone paving': [paving, 6.4 / SCALE], 'Gravel (terrace walks)': [gravel, 4 / SCALE], 'Planting bed (soil, needle litter)': [soil, 3 / SCALE],
   };
 
   const draco = new DRACOLoader(manager).setDecoderPath('./draco/');
   const gltfLoader = new GLTFLoader(manager).setDRACOLoader(draco);
   const fileLoader = new THREE.FileLoader(manager).setResponseType('arraybuffer');
-  const [gltf, treeBuf] = await Promise.all([gltfLoader.loadAsync('assets/monument.glb'), fileLoader.loadAsync('assets/trees.bin')]);
+  const [gltf, treeBuf, holeBuf] = await Promise.all([gltfLoader.loadAsync('assets/monument.glb'), fileLoader.loadAsync('assets/trees.bin'), fileLoader.loadAsync('assets/holes.bin')]);
   draco.dispose();
 
   const root = gltf.scene, solids = [];
@@ -531,7 +512,7 @@ export async function loadWorld(renderer, onProgress) {
     }
     if (isHelper) { mesh.visible = false; continue; }
     const key = mesh.material.name;
-    if (key.startsWith('Vault')) { mesh.material = vaultMaterial(); continue; }
+    if (key === 'Bore') { mesh.material = boreMaterial(); mesh.castShadow = true; continue; }
     if (MATS[key]) {
       const [mat, tile, sph] = MATS[key];
       mesh.geometry = stoneUVs(mesh.geometry, tile, sph);
@@ -550,8 +531,8 @@ export async function loadWorld(renderer, onProgress) {
   const water = makeBasin();
   scene.add(water);
   const sky = makeSky(renderer, scene);
-  const { group: stars, outer: bores } = starVault(sky);
-  scene.add(stars, bores);
+  const stars = vaultLight(holeBuf);
+  scene.add(stars);
   const fire = makeFire();
   scene.add(fire.group);
   makeVisitors(scene);
@@ -572,9 +553,12 @@ export async function loadWorld(renderer, onProgress) {
   const bounce = new THREE.HemisphereLight(0xa9c4ee, 0xb08f64, 0.3);
   scene.add(bounce);
 
-  const inner = new THREE.PointLight(0xe6e4e0, 0, 0, 0);     // daylight from the holes, only felt indoors
+  const inner = new THREE.PointLight(0xdfe4ee, 0, 0, 0);     // daylight scattered about the void, only felt indoors
   inner.position.copy(CENTER);
   scene.add(inner);
 
-  return { scene, bvh, trees, water, stars, sky, fire, sun, inner, bounce };
+  const lantern = new THREE.PointLight(0xffc88a, 0, 16, 1.4);  // what you carry into the passages
+  scene.add(lantern);
+
+  return { scene, bvh, trees, water, stars, sky, fire, sun, inner, bounce, lantern };
 }

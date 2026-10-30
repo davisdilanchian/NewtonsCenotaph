@@ -4,8 +4,9 @@ export const lerp = (a, b, t) => a + (b - a) * t;
 export const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 
 // The model is built to the published 150 m. People, stone courses and ground grain are drawn
-// at 1/SCALE, so the monument reads SCALE times larger. Try another with ?scale=3.
-export const SCALE = clamp(+new URLSearchParams(location.search).get('scale') || 2, 1, 8);
+// at 1/SCALE, so the monument reads SCALE times larger. 3 is the largest at which the cypresses
+// stay a real height, 30 m. Try another with ?scale=5.
+export const SCALE = clamp(+new URLSearchParams(location.search).get('scale') || 3, 1, 8);
 
 export function rng(seed) {
   let s = seed >>> 0;

@@ -50,12 +50,6 @@ for s_ in (-1, 1):
     cols.append(ramp_mesh(f"COL_cornice_guide_{'L' if s_ < 0 else 'R'}",
                           [[(s_ * 30, -76.0, 49), (s_ * 10.3, -84.6, 49), (s_ * 10.3, -84.6, 67), (s_ * 30, -76.0, 67)]]))
 
-# dais stair
-y0, y1 = B.DAIS_STAIR_Y, B.DAIS_STAIR_Y + B.DAIS_STEPS * B.DAIS_TREAD
-z1 = top + B.DAIS_STEPS * B.DAIS_RISE
-cols.append(ramp_mesh("COL_dais_stair", [[(-3.5, y0, top), (3.5, y0, top), (3.5, y1, z1), (-3.5, y1, z1)],
-                                         [(-3.5, y1, z1), (3.5, y1, z1), (3.5, -5.0, z1), (-3.5, -5.0, z1)]]))
-
 # what the page draws
 extra = ["Lions", "Funeral brazier", "Esplanade and walks", "Basin coping"]
 bpy.ops.object.select_all(action="DESELECT")
@@ -89,3 +83,11 @@ with open(os.path.join(OUT, "trees.bin"), "wb") as f:
         x, y, z = o.location
         f.write(struct.pack("<4f", x, z, -y, o.scale.x))
 print("TREES", len(trees), "WOOD", len(wood))
+
+# the vault's openings, for the sunlight that falls through them
+holes = B.star_holes()
+with open(os.path.join(OUT, "holes.bin"), "wb") as f:
+    f.write(struct.pack("<I", len(holes)))
+    for d, r in holes:
+        f.write(struct.pack("<4f", d.x, d.z, -d.y, r))
+print("HOLES", len(holes))

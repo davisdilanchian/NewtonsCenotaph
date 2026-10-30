@@ -25,14 +25,16 @@ D = dict(
     drum_R=118.9, drum_wall_top=43.0, drum_frieze_R=119.3,
     drum_dentil_R=120.2, drum_corona_R=121.0, drum_top=46.5,
     tier_R=82.0, tier_wall_top=62.6, tier_cornice_R=83.2, tier_top=64.0,
-    stair_half_w=21.0, stair_inner_y=-139.0, stair_rise=0.1, stair_steps=55,
-    tunnel_half_w=7.0, tunnel_spring=6.5,
+    stair_half_w=21.0, stair_inner_y=-139.0, stair_rise=0.06, stair_steps=92,
+    tunnel_half_w=7.0, tunnel_spring=6.5,      # the arch at the sphere's foot, now a sealed door
+    passage_half_w=2.2, passage_h=3.9, passage_z=0.06,   # section: 3.9 high, at terrace depth
+    floor_top=9.5,                              # the flat floor round the sarcophagus
+    people_scale=3.0,                           # figures drawn this much smaller, so the site reads 450 m
     v_bottom_half=39.5, v_top_half=10.3,        # front stair block: half-widths, base and top
     stair_block_y=-87.0, stair_block_back=-70.0,  # its front face, and its back, buried in the shell
     cone_r_back=72.0, cone_r_front=80.0,        # drum front cut (cone on Y axis)
     tree_spacing_note="about 3 m along each row, rows paired and staggered",
 )
-DAIS_STEPS, DAIS_RISE, DAIS_TREAD, DAIS_STAIR_Y = 40, 0.1, 0.5, -31.0
 # Ten rows of cypress, measured from the plan (radius m, angular pitch rad,
 # half-angle of the front gap in degrees, ground z, phase offset).
 ROWS = []
@@ -117,18 +119,82 @@ def prism_y(profile, y0, y1):
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     return bm
 
+def passage(points):
+    """Closed arched passage through (x, y, floor z) points, its sides square to the first leg."""
+    a, b = Vector(points[0][:2]), Vector(points[-1][:2])
+    side = Vector((-(b - a).y, (b - a).x)).normalized()
+    w, h = D["passage_half_w"], D["passage_h"]
+    spring = h - w * 0.55
+    profile = [(-w, 0), (w, 0)] + [(w * math.cos(math.pi * k / 16), spring + w * 0.55 * math.sin(math.pi * k / 16)) for k in range(17)]
+    bm = bmesh.new()
+    rings = [[bm.verts.new((x + side.x * u, y + side.y * u, z + v)) for u, v in profile] for x, y, z in points]
+    bm.faces.new(rings[0]); bm.faces.new(list(reversed(rings[-1])))
+    n = len(profile)
+    for r0, r1 in zip(rings, rings[1:]):
+        for i in range(n):
+            j = (i + 1) % n
+            bm.faces.new((r0[i], r1[i], r1[j], r0[j]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return bm
+
+def passages():
+    """Two doors in the terrace wall, either side of the main stair, meeting under the sphere,
+    then Boullée's ramp up through the floor to the sarcophagus. The section's slope is about 23°."""
+    z = D["passage_z"]
+    door_x, door_y = 30.0, -math.sqrt(D["platform_R"] ** 2 - 30.0 ** 2)
+    end = (0.0, -34.0)
+    legs = []
+    for s in (-1, 1):
+        run = Vector((end[0] - s * door_x, end[1] - door_y)).normalized()
+        legs.append([(s * door_x - run.x * 3, door_y - run.y * 3, z), (end[0] + run.x * 2, end[1] + run.y * 2, z)])
+    legs.append([(0, -38.0, z), (0, -26.0, z), (0, -5.0, D["floor_top"])])
+    return legs
+
+def star_holes():
+    """The vault's openings as (direction, inner radius). Only where the shell stands clear of the
+    upper tier does daylight reach them."""
+    rnd = random.Random(1784)
+    band = Vector((0.35, 0.55, 0.76)).normalized()
+    moon = Vector((-0.45, 0.35, 0.82)).normalized()
+    holes, tries = [(moon, 1.9)], 0
+    while len(holes) < 2200 and tries < 400000:
+        tries += 1
+        v = Vector((rnd.uniform(-1, 1), rnd.uniform(-1, 1), rnd.uniform(-1, 1)))
+        if not 0.01 < v.length_squared < 1:
+            continue
+        v.normalize()
+        in_band = abs(v.dot(band)) < 0.11
+        if v.z < -0.08 or rnd.random() > (1.0 if in_band else 0.22):
+            continue
+        r = 0.18 + 0.36 * rnd.random() ** 4
+        if all(v.dot(d) < math.cos((2.3 * (r + q) + 0.3) / 67.0) for d, q in holes):
+            holes.append((v, r))
+    return holes
+
+def hole_cutter():
+    """Bores aimed at the sarcophagus and flaring inward, so the sky stays in view across the floor.
+    A shell 8 m thick shows it through a radial hole only from the centre of the void."""
+    bm = bmesh.new()
+    eye = Vector((0, 0, D["floor_top"] + 0.6))
+    for d, r in star_holes():
+        q = Vector((0, 0, D["sphere_cz"])) + d * D["shell_inner_R"]
+        axis = (q - eye).normalized()
+        m = Matrix.Translation(q + axis * 6.0) @ Vector((0, 0, 1)).rotation_difference(axis).to_matrix().to_4x4()
+        bmesh.ops.create_cone(bm, cap_ends=True, segments=10, radius1=r * 2.35, radius2=r * 0.3, depth=14.0, matrix=m)
+    return bm
+
 def uv_sphere(R, cz, seg=256, rings=128, bm=None):
     bm = bm or bmesh.new()
     bmesh.ops.create_uvsphere(bm, u_segments=seg, v_segments=rings, radius=R,
                               matrix=Matrix.Translation((0, 0, cz)))
     return bm
 
-def boolean(target, cutter, op="DIFFERENCE"):
+def boolean(target, cutter, op="DIFFERENCE", solver="EXACT"):
     m = target.modifiers.new("bool", "BOOLEAN")
     m.operation = op
     m.object = cutter
     try:
-        m.solver = "EXACT"
+        m.solver = solver
     except TypeError:
         m.solver = "MANIFOLD"
     bpy.context.view_layer.objects.active = target
@@ -486,6 +552,9 @@ def build():
     recess = temp_obj("cut_recess", box(-sh, sh, -175, D["stair_inner_y"], -1, 7))
     boolean(plat, recess); kill(recess)
     boolean(plat, sph71)
+    cutters = [temp_obj(f"cut_passage{i}", passage(leg)) for i, leg in enumerate(passages())]
+    for c_ in cutters:
+        boolean(plat, c_)
     # assign paving to top faces
     for p in plat.data.polygons:
         if p.normal.z > 0.9: p.material_index = 1
@@ -552,33 +621,35 @@ def build():
     inner = temp_obj("cut_inner", uv_sphere(D["shell_inner_R"], CZ, 256, 128))
     inner.data.materials.append(M["stars"])     # boolean carries the cutter's material
     boolean(sphere, inner); kill(inner)
-    # entrance tunnel (front, at terrace level)
+    # the arch at the sphere's foot, as drawn in the elevation: a sealed door
     tw, ts = D["tunnel_half_w"], D["tunnel_spring"]
     arch = [(-tw, D["platform_top"]), (tw, D["platform_top"])] + \
            [(tw * math.cos(math.pi * k / 32), ts + tw * math.sin(math.pi * k / 32)) for k in range(33)]
-    tun = temp_obj("cut_tunnel", prism_y(arch, -75, -5))
+    tun = temp_obj("cut_tunnel", prism_y(arch, -75, -31))
     boolean(sphere, tun); kill(tun)
+    mesh_obj("Sealed door", box(-tw, tw, -31.3, -31.0, D["platform_top"], ts + tw), C_MON, M["dark"])
+    for c_ in cutters:
+        boolean(sphere, c_)
+    holes_cut = temp_obj("cut_holes", hole_cutter())
+    boolean(sphere, holes_cut, solver="MANIFOLD"); kill(holes_cut)
+    bore = M["sphere"].copy(); bore.name = "Bore"
     sphere.data.materials.append(M["stars"])
+    sphere.data.materials.append(bore)
+    i_stars, i_bore = len(sphere.data.materials) - 2, len(sphere.data.materials) - 1   # booleans leave empty slots below these
     for p in sphere.data.polygons:
         c_ = p.center - Vector((0, 0, CZ))
         if c_.length < D["shell_inner_R"] + 0.3 and c_.dot(p.normal) < 0:
-            p.material_index = 1
+            p.material_index = i_stars
+        elif D["shell_inner_R"] + 0.3 <= c_.length < R - 0.05 and c_.z > -8:
+            p.material_index = i_bore
     sphere.data.shade_smooth()
-    # tunnel floor + interior dais and sarcophagus
-    mesh_obj("Tunnel floor", box(-D["tunnel_half_w"], D["tunnel_half_w"], -40, -12, D["platform_top"] - 0.5, D["platform_top"]), C_MON, M["paving"])
-    dais = bmesh.new()
+    # one flat floor, as in the section, with the ramp from the passages cut up through it
     floor_z = CZ - D["shell_inner_R"]
-    for i, (r_, h_) in enumerate([(26, 1.0), (18, 2.0), (11, 3.0), (6, 4.0)]):
-        tmp = bpy.data.meshes.new("t"); a_ = annulus(0, r_, floor_z - 3, floor_z - 1.0 + h_, 128); a_.to_mesh(tmp); a_.free()
-        dais.from_mesh(tmp); bpy.data.meshes.remove(tmp)
-    mesh_obj("Interior dais", dais, C_MON, M["dressed"])
-    # stair from the tunnel floor up to the sarcophagus, as in the section drawing
-    ds = bmesh.new()
-    for k in range(DAIS_STEPS):
-        box(-3.5, 3.5, DAIS_STAIR_Y + k * DAIS_TREAD, -5.0, D["platform_top"] - 0.5,
-            D["platform_top"] + DAIS_RISE * (k + 1), ds)
-    mesh_obj("Dais stair", ds, C_MON, M["paving"])
-    sz = floor_z - 1.0 + 4.0
+    plain = mesh_obj("Interior floor", annulus(0, 26, floor_z - 3, D["floor_top"], 128), C_MON, M["paving"])
+    boolean(plain, cutters[-1])
+    for c_ in cutters:
+        kill(c_)
+    sz = D["floor_top"]
     sar = box(-1.4, 1.4, -2.6, 2.6, sz, sz + 0.5)
     box(-1.15, 1.15, -2.35, 2.35, sz + 0.5, sz + 1.8, sar)
     box(-1.35, 1.35, -2.55, 2.55, sz + 1.8, sz + 2.2, sar)
@@ -985,7 +1056,7 @@ def build_figures(c, M):
         for k in range(n):
             ob = bpy.data.objects.new("figure", meshes[rnd.randrange(len(meshes))])
             ob.location = (cx + rnd.uniform(-spread, spread), cy + rnd.uniform(-spread, spread), z)
-            s = rnd.uniform(0.92, 1.06); ob.scale = (s, s, s)
+            s = rnd.uniform(0.92, 1.06) / D["people_scale"]; ob.scale = (s, s, s)
             c.objects.link(ob)
     pt, dt = D["platform_top"], D["drum_top"]
     group(0, -133, pt, 6, 6)           # at the head of the main stair

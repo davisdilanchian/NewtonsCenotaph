@@ -4,7 +4,7 @@ A to-scale 3D model of Étienne-Louis Boullée's *Cénotaphe de Newton* (1784), 
 
 **[Walk through it in your browser](https://davisdilanchian.github.io/NewtonsCenotaph/)** (first-person, three.js).
 
-The page draws people, stone courses and ground grain at half size, so the sphere reads as 300 m across instead of the published 150 m. That is a choice for the sense of size, not a finding: the drawing's own figures stay close to 150 m. Add `?scale=1`, `?scale=3` or `?scale=5` to the address to compare. The Blender model and renders stay at 150 m.
+The page and the model's figures read the monument at 3× its published size: a 450 m sphere. That is a choice for the sense of size, not a finding. The drawing's own figures stay closer to 150 m, but 3× is the largest size at which everything stays believable, with the cypresses at a real 30 m. Add `?scale=1`, `?scale=2` or `?scale=5` to the page's address to compare. Model units stay in the published 150 m scale; only the figures change.
 
 Controls: WASD to walk, Shift to run, Space to jump, mouse to look, Esc to free the cursor, 1–7 to jump between places, R to reset. On a phone, use the on-screen stick and drag to look.
 
@@ -60,13 +60,14 @@ Origin is the sphere's axis at natural ground. The front (main stair, tunnel) fa
 |---|---|
 | Sphere | outer Ø150 m, inner Ø134 m (shell ≈ 8 m), centre 73.5 m above ground, top at 148.5 m |
 | Ground terrace (platform) | Ø315 m, 5.5 m high |
-| Main stair | 42 m wide, 55 risers of 0.1 m, set into the terrace edge |
+| Main stair | 42 m wide, 92 risers of 0.06 units, set into the terrace edge |
 | Drum (main cylinder) | Ø238 m wall, cornice Ø242 m, top at 46.5 m |
 | Upper tier | Ø164 m wall, cornice Ø166 m, top at 64 m |
 | Front opening in the drum | cone cut around the sphere, ±42 m wide at terrace level, ±74 m under the cornice; the cornice runs across as a bridge |
-| Front stair block | solid block against the upper tier, 79 m wide at the bridge, 21 m at the top, 21 m deep, with a flight of 175 risers of 0.1 m on each side and the small door at its foot |
-| Entrance tunnel | 14 m wide, 8 m high, at terrace level |
-| Dais stair | 40 risers of 0.1 m, from the tunnel floor up to the sarcophagus at 9.5 m |
+| Front stair block | solid block against the upper tier, 79 m wide at the bridge, 21 m at the top, 21 m deep, with a flight of 292 risers of 0.06 units on each side and the small door at its foot |
+| Passages | 3.9 units high and 4.4 wide, from two doors beside the main stair, under the whole terrace, meeting under the sphere: about 160 units long |
+| Ramp | climbs at about 24° through the floor to the sarcophagus at 9.5 units |
+| Vault openings | 2,200 bores cut by boolean through the shell, above the upper tier, aimed at the sarcophagus and flaring inward |
 
 ## The cypresses
 
@@ -104,7 +105,8 @@ If you want a concrete version, swap the `Limestone ashlar` and `Limestone dress
 - How deep the front bridge is can't be read from an elevation. It is modelled as the full width of the drum cornice.
 - The front stairs are read as a solid block standing against the upper tier, not a V cut into it. A cut left the tier overhanging its own stairs, and the block fits the hatched band in front of the tier on the plan and the door at the foot of the trapezoid on the elevation.
 - The drawings show no stair from the ground terrace up to the drum terrace, so the page has none. Its number keys jump there instead.
-- The dais stair inside the sphere is a plain stair I added so visitors can reach the sarcophagus. It is not taken from a drawing.
+- The section (sheet 04) shows a long, low passage under the floor, rising to the sarcophagus. The doors beside the main stair are my reading: the section doesn't run through the front, and the arch in the elevation stands too close to the centre to start a long passage, so that arch is modelled as a sealed door.
+- The shafts of sunlight on the page are artistic: bores this narrow would pass direct sun for only a few minutes.
 - The drawings show the lions only as small dark shapes, so their pose and modelling are my reading. The brazier, small portal and people are simplified stand-ins for scale.
 - The interior galleries shown in the section, inside the drum, are not modelled. The drum is solid.
 - Seen from a few metres away, the cypress foliage looks lumpy. It reads well from the normal viewing distances.
