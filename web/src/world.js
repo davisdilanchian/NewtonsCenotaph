@@ -465,7 +465,7 @@ export async function loadWorld(renderer, onProgress) {
   const ashlar = weathered(std({ color: LIMESTONE, map: T('ashlar', true), normalMap: T('ashlar_n'), normalScale: nS(0.9) }));
   const stone = T('stone', true), stoneN = T('stone_n');
   const dressed = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.5), roughness: 0.74 }), { streaks: 0.4 });
-  const boreStone = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.8 }), { streaks: 0, level: 0.0022 });   // the bake's vertices are too few for these narrow bores
+  const boreStone = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.8 }), { streaks: 0, level: 0.016 });   // the bake's vertices are too few for these narrow bores
   const sphere = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.25), roughness: 0.72, envMapIntensity: 0.45 }), { courses: true });
   const vault = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.9, dithering: true }), { courses: true, streaks: 0.6 });
   const paving = weathered(std({ color: LIMESTONE, map: T('paving', true), normalMap: T('paving_n'), normalScale: nS(0.7) }), { streaks: 0 });
@@ -538,7 +538,7 @@ export async function loadWorld(renderer, onProgress) {
   sun.shadow.mapSize.setScalar(matchMedia('(pointer: coarse)').matches ? 2048 : 4096);
   sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.35; sun.shadow.radius = 2.2;
   scene.add(sun, sun.target);
-  let close = false;
+  let close = false, sunStrength = 3;
   const low = new THREE.Color(0xffb878), high = new THREE.Color(0xfff0dc);
   const skyUniforms = sky.material.uniforms;
   const refresh = () => {
@@ -557,7 +557,8 @@ export async function loadWorld(renderer, onProgress) {
     skyUniforms.sunPosition.value.copy(SUN);
     const lift = smooth(0.1, 0.6, SUN.y);
     sun.color.lerpColors(low, high, lift);
-    sun.intensity = 2.6 + 1.1 * lift;
+    sunStrength = 2.6 + 1.1 * lift;
+    sun.intensity = close ? 0 : sunStrength;     // inside, sunlight arrives only down the bores
     SKY_LEVEL.value = 0.5 + 0.5 * lift;
     sun.position.copy(sun.target.position).addScaledVector(SUN, 1100);
   };
@@ -572,10 +573,10 @@ export async function loadWorld(renderer, onProgress) {
   };
   refresh();
 
-  const shafts = makeSunshafts(holeBuf, new THREE.Vector3(0, 14.6, 0));
+  const shafts = makeSunshafts(holeBuf);
   shafts.mesh.visible = false;
   scene.add(shafts.mesh);
 
-  return { scene, bvh, trees, water, sky, fire, sun, setSun, refresh, shadowsClose, lamps, shafts };
+  return { scene, bvh, trees, water, sky, fire, sun, setSun, refresh, shadowsClose, lamps, shafts, sunStrength: () => sunStrength };
 
 }

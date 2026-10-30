@@ -80,6 +80,7 @@ function showSheets() {
 }
 
 let world, player, dayClock = 0.2, shadowClock = 0, wasInVoid = false;
+const lightProbe = { color: new THREE.Color(), intensity: 1 };
 const keys = new Set();
 const input = { x: 0, y: 0, run: false, jump: false };
 const touchMove = { x: 0, y: 0 };
@@ -239,9 +240,8 @@ function tick(dt) {
   world.shafts.mesh.visible = inVoid;
   shadowClock -= dt;
   if (shadowClock <= 0 || keys.has('KeyT')) {
-    shadowClock = inVoid ? 1.5 : 20;
-    world.refresh();
-    if (inVoid) world.shafts.update(SUN, world.sun);
+    shadowClock = inVoid ? 1 : 20;
+    if (inVoid) { lightProbe.color.copy(world.sun.color); lightProbe.intensity = world.sunStrength(); world.shafts.update(SUN, lightProbe); } else world.refresh();
   }
 
   world.water.material.uniforms.time.value = time;

@@ -67,7 +67,7 @@ Origin is the sphere's axis at natural ground. The front (main stair, tunnel) fa
 | Front stair block | solid block against the upper tier, 79 m wide at the bridge, 21 m at the top, 21 m deep, with a flight of 292 risers of 0.06 units on each side and the small door at its foot |
 | Passages | 3.9 units high and 4.4 wide, level with the terrace, from the arch in the cylinder and from the east and west sides of the drum, each about 100 units long |
 | Floor | a raised floor at 14 units with a low mound to 17 units under the sarcophagus. Each passage ramps up at about 25° and comes out below it |
-| Vault openings | the sky over Woolsthorpe at Newton's birth: each star above the horizon is a bore cut by boolean through the shell, sized by its brightness and aimed at the sarcophagus |
+| Vault openings | the sky over Woolsthorpe at Newton's birth: each star above the horizon is a long straight bore cut by boolean through the shell, sized by its brightness, aimed at its own fixed spot on the floor |
 
 ## The cypresses
 
@@ -118,8 +118,8 @@ If you want a concrete version, swap the `Limestone ashlar` and `Limestone dress
 
 Nothing inside is painted on. The sun moves across the sky, and everything it does comes from the geometry:
 
-- **Sun:** one light with a shadow map. Underground and in the void the map closes in on the shell, fine enough to resolve the bores, so light lands only where a bore really lines up with the sun.
-- **Shafts in the air:** each bore is tested against the sun as the real tapering hole it is, and the light through it is drawn with the exact length of the view ray inside the beam, in `web/src/sunshafts.js`.
+- **Sun:** one light with a shadow map outdoors and in the passages.
+- **Columns inside:** an 8 m bore is a light pipe, not a pinhole. Light can only leave along its axis, so each column and its pool on the floor stay fixed. Only their strength changes: the sky keeps each faintly lit, and sunlight adds to it as the sun nears the bore's line, losing a share at every bounce off the wall. See `web/src/sunshafts.js`. The columns are drawn with the exact length of the view ray inside them.
 - **Sky light inside the sphere:** the form factor from every bore to every vertex, plus the exact interreflection for a closed sphere.
 - **Sky light and bounce elsewhere:** path traced in Cycles into the vertices by `scripts/export_web.py`, along with the passage lamps. The bounce is baked from a midday sun, so it doesn't move with the sun.
 - **Exposure:** the eye adapts as you go from daylight into the dark.

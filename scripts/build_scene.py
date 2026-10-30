@@ -189,27 +189,29 @@ def star_holes():
     return holes
 
 def bore_flare(r):
-    """Radius of a bore where it opens into the void."""
-    return r * 2.2 + 0.6
+    """Radius of a bore where it opens into the void: all but straight, so it works as a light pipe."""
+    return r * 1.35 + 0.05
+
+def bore_target(d):
+    """Where a star's bore points: its own fixed spot on the floor, the sky laid out round the
+    sarcophagus, overhead stars closest in. Its shaft of light can only ever land here."""
+    h = math.hypot(d.x, d.y) or 1.0
+    reach = 12.0 + 17.0 * (1.0 - d.z)
+    return Vector((d.x / h * reach, d.y / h * reach, D["floor_top"]))
 
 def hole_cutter():
-    """A small round throat just inside the outer face, flaring all the way down through the shell.
-    The sun can pass from many angles, while outside only the throat shows. Each bore is aimed at
-    the sarcophagus, so the sky stays in view from the floor."""
+    """Long straight bores through the 8 m shell, each aimed at its spot on the floor."""
     bm = bmesh.new()
-    eye = Vector((0, 0, D["floor_top"] + 0.6))
     for d, r in star_holes():
         q = Vector((0, 0, D["sphere_cz"])) + d * D["shell_inner_R"]
-        axis = (q - eye).normalized()
-        throat = 8.0 / max(0.3, axis.dot(d)) - 0.7
+        axis = (q - bore_target(d)).normalized()
         t = axis.orthogonal().normalized(); u = axis.cross(t)
         rings = [[bm.verts.new(q + axis * h + (t * math.cos(a) + u * math.sin(a)) * rad) for a in (2 * math.pi * k / 12 for k in range(12))]
-                 for h, rad in ((-1.5, bore_flare(r) * 1.05), (throat, r), (throat + 6.0, r))]
+                 for h, rad in ((-1.5, bore_flare(r) * 1.04), (14.0, r))]
         bm.faces.new(rings[0]); bm.faces.new(list(reversed(rings[-1])))
-        for r0, r1 in zip(rings, rings[1:]):
-            for i in range(12):
-                j = (i + 1) % 12
-                bm.faces.new((r0[i], r1[i], r1[j], r0[j]))
+        for i in range(12):
+            j = (i + 1) % 12
+            bm.faces.new((rings[0][i], rings[1][i], rings[1][j], rings[0][j]))
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     return bm
 
