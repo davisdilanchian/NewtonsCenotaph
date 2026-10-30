@@ -44,11 +44,14 @@ const EYE = 1.63;
 let inside = 0, time = 0, stride = 0, bob = 0, lodAt = new THREE.Vector2(1e9, 1e9), lodClock = 0, started = false;
 
 
-function teleport(i) {
-  const p = PLACES[i];
+function arrive(p) {
   player.place({ x: p.at[0], y: p.at[1], z: p.at[2] }, { x: p.look[0], z: p.look[2] });
   player.pitch = 0.16;
   show(p);
+}
+
+function teleport(i) {
+  arrive(PLACES[i]);
   $('keys').classList.add('faded');
 }
 
@@ -130,7 +133,7 @@ function tick(dt) {
   world.stars.userData.points.material.uniforms.scale.value = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
 
   world.water.material.uniforms.time.value = time;
-  world.sky.material.uniforms.time.value = time * 12;
+  world.sky.material.uniforms.time.value = time * 4;
   world.fire.update(dt, time);
 
   lodClock += dt;
@@ -149,7 +152,7 @@ function bindControls() {
     if (e.repeat) return;
     keys.add(e.code);
     if (e.code === 'Space') { input.jump = true; e.preventDefault(); }
-    if (e.code === 'KeyR') teleport(1);
+    if (e.code === 'KeyR') teleport(0);
     const n = +e.key;
     if (n >= 1 && n <= PLACES.length) teleport(n - 1);
     if (e.code.startsWith('Key') || e.code.startsWith('Arrow')) $('keys').classList.add('faded');
@@ -202,8 +205,7 @@ async function start() {
   player = new Player({ bvh: world.bvh, groundHeight, treeHash: world.trees.hash });
   bindControls();
 
-  player.place({ x: 0, y: 0, z: 190 }, { x: 0, z: 0 });
-  player.pitch = 0.24;
+  arrive(PLACES[0]);
   world.trees.updateLOD(1e6, 1e6, 75);          // every tree in the shadow map
   world.fire.update(0.016, 0);
   renderer.shadowMap.needsUpdate = true;
@@ -221,7 +223,6 @@ async function start() {
     $('intro').classList.add('gone');
     $('hud').classList.add('on');
     started = true;
-    show(PLACES[1]);
     if (!touch) canvas.requestPointerLock?.()?.catch?.(() => {});
   });
 }
