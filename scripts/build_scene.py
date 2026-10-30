@@ -179,25 +179,38 @@ def star_holes():
     South lies over the front of the monument."""
     sky = json.load(open(os.path.join(ROOT, "docs", "birth_sky.json")))
     moon = next(b for b in sky["bodies"] if b["name"] == "Moon")
-    holes = [(Vector(moon["d"]).normalized(), 1.9)]
+    holes = [(Vector(moon["d"]).normalized(), 1.2)]
     up = [{"d": b["d"], "mag": b["mag"]} for b in sky["bodies"] if b["name"] != "Moon" and b["alt"] > 2]
     for st in sorted(sky["stars"] + up, key=lambda x: x["mag"]):
         v = Vector(st["d"]).normalized()
-        r = max(0.075, min(0.6, 0.5 * 10 ** (-0.13 * st["mag"])))
-        if all(v.dot(d) < math.cos((2.35 * (r + q) + 0.1) / 67.0) for d, q in holes):
+        r = max(0.1, min(0.42, 0.36 * 10 ** (-0.1 * st["mag"])))
+        if all(v.dot(d) < math.cos((bore_flare(r) + bore_flare(q) + 0.1) / 67.0) for d, q in holes):
             holes.append((v, r))
     return holes
 
+def bore_flare(r):
+    """Radius of a bore where it opens into the void."""
+    return r * 2.2 + 0.6
+
 def hole_cutter():
-    """Bores aimed at the sarcophagus and flaring inward, so the sky stays in view across the floor.
-    A shell 8 m thick shows it through a radial hole only from the centre of the void."""
+    """A small round throat just inside the outer face, flaring all the way down through the shell.
+    The sun can pass from many angles, while outside only the throat shows. Each bore is aimed at
+    the sarcophagus, so the sky stays in view from the floor."""
     bm = bmesh.new()
     eye = Vector((0, 0, D["floor_top"] + 0.6))
     for d, r in star_holes():
         q = Vector((0, 0, D["sphere_cz"])) + d * D["shell_inner_R"]
         axis = (q - eye).normalized()
-        m = Matrix.Translation(q + axis * 6.0) @ Vector((0, 0, 1)).rotation_difference(axis).to_matrix().to_4x4()
-        bmesh.ops.create_cone(bm, cap_ends=True, segments=12, radius1=r * 2.35, radius2=r * 0.05, depth=14.0, matrix=m)
+        throat = 8.0 / max(0.3, axis.dot(d)) - 0.7
+        t = axis.orthogonal().normalized(); u = axis.cross(t)
+        rings = [[bm.verts.new(q + axis * h + (t * math.cos(a) + u * math.sin(a)) * rad) for a in (2 * math.pi * k / 12 for k in range(12))]
+                 for h, rad in ((-1.5, bore_flare(r) * 1.05), (throat, r), (throat + 6.0, r))]
+        bm.faces.new(rings[0]); bm.faces.new(list(reversed(rings[-1])))
+        for r0, r1 in zip(rings, rings[1:]):
+            for i in range(12):
+                j = (i + 1) % 12
+                bm.faces.new((r0[i], r1[i], r1[j], r0[j]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     return bm
 
 def uv_sphere(R, cz, seg=256, rings=128, bm=None):

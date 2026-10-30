@@ -42,7 +42,7 @@ function load(name, srgb, renderer, manager) {
 const SKY_LEVEL = { value: 1 };                 // follows the height of the sun
 
 /** Weather that repeats nowhere: broad tonal drift, rain streaks, and the sphere's stone courses. */
-function weathered(mat, { streaks = 1, courses = false } = {}) {
+function weathered(mat, { streaks = 1, courses = false, level = 1 } = {}) {
   mat.onBeforeCompile = (s) => {
     s.uniforms.skyLevel = SKY_LEVEL;
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWP, vBaked; attribute vec3 baked;')
@@ -51,7 +51,7 @@ function weathered(mat, { streaks = 1, courses = false } = {}) {
       #ifdef USE_ENVMAP
         iblIrradiance = vec3(0.0);                    // diffuse sky comes from the path traced bake instead
       #endif
-      irradiance += vBaked * skyLevel;`)
+      irradiance += vBaked * skyLevel * ${level.toFixed(3)};`)
       .replace('#include <common>', `#include <common>
       varying vec3 vWP, vBaked; uniform float skyLevel;
       float vh(vec3 p) { p = fract(p * 0.3183 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
@@ -409,6 +409,7 @@ function makeFire() {
   }
   return {
     group,
+    light,
     update(dt, time, camera) {
       group.rotation.y = Math.atan2(camera.position.x - group.position.x, camera.position.z - group.position.z);
       flame.material.uniforms.t.value = time;
@@ -464,6 +465,7 @@ export async function loadWorld(renderer, onProgress) {
   const ashlar = weathered(std({ color: LIMESTONE, map: T('ashlar', true), normalMap: T('ashlar_n'), normalScale: nS(0.9) }));
   const stone = T('stone', true), stoneN = T('stone_n');
   const dressed = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.5), roughness: 0.74 }), { streaks: 0.4 });
+  const boreStone = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.8 }), { streaks: 0, level: 0.0022 });   // the bake's vertices are too few for these narrow bores
   const sphere = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.25), roughness: 0.72, envMapIntensity: 0.45 }), { courses: true });
   const vault = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.9, dithering: true }), { courses: true, streaks: 0.6 });
   const paving = weathered(std({ color: LIMESTONE, map: T('paving', true), normalMap: T('paving_n'), normalScale: nS(0.7) }), { streaks: 0 });
@@ -472,7 +474,7 @@ export async function loadWorld(renderer, onProgress) {
   const foliage = std({ map: T('cypress', true), normalMap: T('cypress_n'), normalScale: nS(1.2), vertexColors: true, roughness: 0.86 });
   const grass = [T('grass', true), T('grass_n')];
   const MATS = {
-    'Vault: pierced shell (star holes)': [vault, 12, true], Bore: [dressed, 12 / SCALE], 'Limestone ashlar': [ashlar, 15.6 / SCALE], 'Limestone dressed': [dressed, 12 / SCALE], 'Limestone sphere': [sphere, 12, true],
+    'Vault: pierced shell (star holes)': [vault, 12, true], Bore: [boreStone, 12 / SCALE], 'Limestone ashlar': [ashlar, 15.6 / SCALE], 'Limestone dressed': [dressed, 12 / SCALE], 'Limestone sphere': [sphere, 12, true],
     'Limestone paving': [paving, 6.4 / SCALE], 'Gravel (terrace walks)': [gravel, 4 / SCALE], 'Planting bed (soil, needle litter)': [soil, 3 / SCALE],
   };
 

@@ -79,11 +79,11 @@ function showSheets() {
     sheetTimer = setInterval(() => pick((current + 1) % SHEETS.length), 6000);
 }
 
-let world, player, dayClock = 0.2, shadowClock = 0;
+let world, player, dayClock = 0.2, shadowClock = 0, wasInVoid = false;
 const keys = new Set();
 const input = { x: 0, y: 0, run: false, jump: false };
 const touchMove = { x: 0, y: 0 };
-const EYE = 1.63 / SCALE, EYE_VOID = 70, EYE_PASSAGE = 8;   // exposure once the eye has adapted
+const EYE = 1.63 / SCALE, EYE_VOID = 190, EYE_PASSAGE = 8;   // exposure once the eye has adapted
 let inside = 0, tunnel = 0, time = 0, stride = 0, bob = 0, lodAt = new THREE.Vector2(1e9, 1e9), lodClock = 0, started = false;
 
 
@@ -234,6 +234,7 @@ function tick(dt) {
   world.scene.fog.density = lerp(FOG, 0.0006, inside);
   world.scene.fog.color.lerpColors(fogDay, fogVoid, inside);
   const inVoid = p.distanceTo(CENTER) < 66.5;
+  if (inVoid !== wasInVoid) { wasInVoid = inVoid; shadowClock = 0; }
   world.shadowsClose(inVoid);
   world.shafts.mesh.visible = inVoid;
   shadowClock -= dt;
@@ -248,6 +249,7 @@ function tick(dt) {
   world.lamps.material.uniforms.scale.value = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
   world.sky.material.uniforms.time.value = time * 4;
   world.fire.update(dt, time, camera);
+  world.fire.light.visible = !isIn;                  // it has no shadows, so it would shine straight through the shell
 
   lodClock += dt;
   if (lodClock > 0.25 && lodAt.distanceTo({ x: p.x, y: p.z }) > 6) {
