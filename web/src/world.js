@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { Sky } from 'three/addons/objects/Sky.js';
-import { Reflector } from 'three/addons/objects/Reflector.js';
+import { Reflector } from './mirror.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
 import { noise3, rng, smooth, SCALE } from './util.js';
@@ -50,6 +50,7 @@ function weathered(mat, { streaks = 1, courses = false, level = 1 } = {}) {
     s.fragmentShader = s.fragmentShader.replace('#include <lights_fragment_maps>', `#include <lights_fragment_maps>
       #ifdef USE_ENVMAP
         iblIrradiance = vec3(0.0);                    // diffuse sky comes from the path traced bake instead
+        radiance = vec3(0.0);                         // and the sky isn't reflected, or it would shine indoors too
       #endif
       irradiance += vBaked * skyLevel * ${level.toFixed(3)};`)
       .replace('#include <common>', `#include <common>
@@ -113,6 +114,10 @@ function stoneUVs(source, tile, sphere) {
  * vertex with the form factor between them. Inside a closed sphere every patch then sees every
  * other equally, so interreflection adds the same amount everywhere: mean * albedo / (1 - albedo).
  */
+// One exposure serves the whole site, so the dark interior is set permanently to where the eye would
+// settle in it, rather than changing the camera as you cross a threshold.
+const INDOORS = 264, PASSAGES = 11;
+
 function skyThroughHoles(buffer, geometries) {
   const count = new Uint32Array(buffer, 0, 1)[0], data = new Float32Array(buffer, 4, count * 4), STRIDE = 3;
   const hx = [], hy = [], hz = [], dx = [], dy = [], dz = [], area = [];
@@ -140,7 +145,7 @@ function skyThroughHoles(buffer, geometries) {
   const albedo = 0.45, shared = (sum / verts) * albedo / (1 - albedo);
   geometries.forEach((g, i) => {
     const E = fields[i], baked = new Float32Array(E.length * 3);
-    for (let v = 0; v < E.length; v++) { const e = E[v] + shared; baked[v * 3] = e * 0.74; baked[v * 3 + 1] = e * 0.86; baked[v * 3 + 2] = e; }
+    for (let v = 0; v < E.length; v++) { const e = (E[v] + shared) * INDOORS; baked[v * 3] = e * 0.74; baked[v * 3 + 1] = e * 0.86; baked[v * 3 + 2] = e; }
     g.setAttribute('baked', new THREE.BufferAttribute(baked, 3));
   });
 }
@@ -327,6 +332,7 @@ function makeSky(renderer, scene) {
   envScene.add(sky);
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(envScene, 0, 1, 20000).texture;
+  scene.environmentIntensity = 0.42;
   pmrem.dispose();
   scene.add(sky);
   return sky;
@@ -379,7 +385,7 @@ function makeFire() {
   }));
   group.add(flame);
 
-  const light = new THREE.PointLight(0xff9a48, 0, 70, 1.5);
+  const light = new THREE.PointLight(0xff9a48, 0, 34, 1.5);    // it has no shadows: this reach stops short of the vault inside
   light.position.y = 3.5;
   group.add(light);
 
@@ -465,7 +471,7 @@ export async function loadWorld(renderer, onProgress) {
   const ashlar = weathered(std({ color: LIMESTONE, map: T('ashlar', true), normalMap: T('ashlar_n'), normalScale: nS(0.9) }));
   const stone = T('stone', true), stoneN = T('stone_n');
   const dressed = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.5), roughness: 0.74 }), { streaks: 0.4 });
-  const boreStone = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.8 }), { streaks: 0, level: 0.016 });   // the bake's vertices are too few for these narrow bores
+  const boreStone = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.8 }), { streaks: 0, level: 1.5 });   // the bake's vertices are too few for these narrow bores
   const sphere = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.25), roughness: 0.72, envMapIntensity: 0.45 }), { courses: true });
   const vault = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.9, dithering: true }), { courses: true, streaks: 0.6 });
   const paving = weathered(std({ color: LIMESTONE, map: T('paving', true), normalMap: T('paving_n'), normalScale: nS(0.7) }), { streaks: 0 });
@@ -504,7 +510,18 @@ export async function loadWorld(renderer, onProgress) {
     if (MATS[key]) {
       const [mat, tile, sph] = MATS[key];
       const g = stoneUVs(mesh.geometry, tile, sph);
-      if (g.attributes.color) { g.setAttribute('baked', g.attributes.color); g.deleteAttribute('color'); }
+      if (g.attributes.color) {
+        const c = g.attributes.color, pos = g.attributes.position, baked = new Float32Array(c.count * 3);
+        for (let v = 0; v < c.count; v++) {
+          const x = pos.getX(v), y = pos.getY(v), z = pos.getZ(v);
+          const inFront = Math.abs(x) < 7.3 && z > 0 && z < 110, inSide = Math.abs(z) < 3.5 && Math.abs(x) < 125;
+          const depth = y < 14.1 ? (inFront ? 108 - z : inSide ? 121 - Math.abs(x) : 0) : 0, k = 1 + (PASSAGES - 1) * smooth(0, 14, depth);
+          const least = name === 'Basin coping' ? 0.16 : 0;   // its sides meet the ground, where the bake's vertices went dark
+          baked[v * 3] = Math.max(c.getX(v) * k, least); baked[v * 3 + 1] = Math.max(c.getY(v) * k, least); baked[v * 3 + 2] = Math.max(c.getZ(v) * k, least);
+        }
+        g.setAttribute('baked', new THREE.BufferAttribute(baked, 3));
+        g.deleteAttribute('color');
+      }
       mesh.geometry = g;
       mesh.material = mat;
       if (key.startsWith('Vault') || name === 'Interior floor' || name.startsWith('Sarcophagus')) inside.push(g);
@@ -576,9 +593,12 @@ export async function loadWorld(renderer, onProgress) {
   refresh();
 
   const shafts = makeSunshafts(holeBuf);
+  const tomb = new THREE.PointLight(0xfff0d8, 0, 42, 1.6);   // the light of all the bores, arriving together on the sarcophagus
+  tomb.position.set(0, 28, 0);
+  scene.add(tomb);
   shafts.mesh.visible = false;
   scene.add(shafts.mesh);
 
-  return { scene, bvh, trees, water, sky, fire, sun, setSun, refresh, shadowsClose, lamps, shafts, sunStrength: () => sunStrength };
+  return { scene, bvh, trees, water, sky, fire, sun, setSun, refresh, shadowsClose, lamps, shafts, tomb, sunStrength: () => sunStrength };
 
 }

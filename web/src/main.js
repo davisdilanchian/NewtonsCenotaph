@@ -27,7 +27,6 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-const fogDay = new THREE.Color(0xd3dbe3), fogVoid = new THREE.Color(0x05070a), FOG = 0.00045 * Math.sqrt(SCALE);
 const DAY = 2400;                               // seconds for the sun to cross the sky
 const metres = (v) => `${Math.round(v * SCALE)} m`;
 
@@ -84,8 +83,8 @@ const lightProbe = { color: new THREE.Color(), intensity: 1 };
 const keys = new Set();
 const input = { x: 0, y: 0, run: false, jump: false };
 const touchMove = { x: 0, y: 0 };
-const EYE = 1.63 / SCALE, EYE_VOID = 190, EYE_PASSAGE = 8;   // exposure once the eye has adapted
-let inside = 0, tunnel = 0, time = 0, stride = 0, bob = 0, lodAt = new THREE.Vector2(1e9, 1e9), lodClock = 0, started = false;
+const EYE = 1.63 / SCALE;
+let time = 0, stride = 0, bob = 0, lodAt = new THREE.Vector2(1e9, 1e9), lodClock = 0, started = false;
 
 
 // On a phone the screen is a window into the space: turn to look, and walk for real to move.
@@ -219,21 +218,12 @@ function tick(dt) {
   if (started) simulate(dt);
   updateCamera(dt);
 
-  // adjust to the dark when entering the shell
   const p = player.pos;
-  const below = underground(), isIn = below || p.distanceTo(CENTER) < 67;
-  inside = lerp(inside, isIn ? 1 : 0, Math.min(1, dt * 1.6));
-  tunnel = lerp(tunnel, below ? 1 : 0, Math.min(1, dt * 2.5));
   // the sun crosses the sky and back; holding T hurries it along
   dayClock += dt * (keys.has('KeyT') ? 120 : 1) / DAY;
   const leg = dayClock % 2;
   world.setSun(leg < 1 ? leg : 2 - leg);
 
-  // nothing lights the dark but the sun and the sky: the eye adapts, as it would
-  world.scene.environmentIntensity = lerp(0.42, 0, inside);
-  renderer.toneMappingExposure = lerp(0.72, lerp(EYE_VOID, EYE_PASSAGE, tunnel), inside);
-  world.scene.fog.density = lerp(FOG, 0.0006, inside);
-  world.scene.fog.color.lerpColors(fogDay, fogVoid, inside);
   const inVoid = p.distanceTo(CENTER) < 66.5;
   if (inVoid !== wasInVoid) { wasInVoid = inVoid; shadowClock = 0; }
   world.shadowsClose(inVoid);
@@ -241,15 +231,14 @@ function tick(dt) {
   shadowClock -= dt;
   if (shadowClock <= 0 || keys.has('KeyT')) {
     shadowClock = inVoid ? 1 : 20;
-    if (inVoid) { lightProbe.color.copy(world.sun.color); lightProbe.intensity = world.sunStrength(); world.shafts.update(SUN, lightProbe); } else world.refresh();
+    if (inVoid) { lightProbe.color.copy(world.sun.color); lightProbe.intensity = world.sunStrength(); world.tomb.intensity = world.shafts.update(SUN, lightProbe) * 24; } else { world.tomb.intensity = 0; world.refresh(); }
   }
 
   world.water.material.uniforms.time.value = time;
   world.lamps.material.uniforms.t.value = time;
   world.lamps.material.uniforms.scale.value = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
-  world.sky.material.uniforms.time.value = time * 4;
+  world.sky.material.uniforms.time.value = time;
   world.fire.update(dt, time, camera);
-  world.fire.light.visible = !isIn;                  // it has no shadows, so it would shine straight through the shell
 
   lodClock += dt;
   if (lodClock > 0.25 && lodAt.distanceTo({ x: p.x, y: p.z }) > 6) {
@@ -325,7 +314,9 @@ async function start() {
   player = new Player({ bvh: world.bvh, groundHeight, treeHash: world.trees.hash });
   bindControls();
 
-  $('about').textContent = `Published accounts put the sphere at 150 m. This reconstruction, judged by eye from the people and cypresses in his drawings, stands it ${metres(150)} wide, with all 2,139 cypresses.`;
+  $('about').innerHTML = SCALE === 1
+    ? 'This is the published size: a sphere 150 m wide. <a href="./">Walk it at three times that</a>, the size at which it feels right on a screen.'
+    : `Published accounts put the sphere at 150 m, which the figures in his drawings bear out. A screen fills only a fraction of your view and shrinks that sense of size, so this walk stands it ${metres(150)} wide to feel as it would in person. <a href="?scale=1">Walk it at the published size</a>.`;
   arrive(PLACES[0]);
   world.trees.updateLOD(1e6, 1e6, 75);          // every tree in the shadow map
   world.fire.update(0.016, 0, camera);

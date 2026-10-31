@@ -4,7 +4,7 @@ A to-scale 3D model of Étienne-Louis Boullée's *Cénotaphe de Newton* (1784), 
 
 **[Walk through it in your browser](https://davisdilanchian.github.io/NewtonsCenotaph/)** (first-person, three.js).
 
-The page and the model's figures read the monument at 3× its published size: a 450 m sphere, judged by eye from the people and cypresses. Measured directly, the drawn figures put it closer to 130–180 m (see below), so 450 m is a choice for the sense of size, not a finding. Add `?scale=1`, `?scale=2` or `?scale=5` to compare. Model units stay in the published 150 m scale; only the figures change.
+The page walks the monument at 3× its published size, a 450 m sphere. Published accounts give 150 m, and the figures in the drawings measure about 130–180 m, so 150 m stands as the historical figure. The 3× is a choice for feeling, not a finding: a screen fills only a fraction of your view, which shrinks the sense of size. The splash links to the published size, or add `?scale=1` to the address.
 
 On a phone, turn to look and walk for real to move: the page counts your steps. Elsewhere: WASD to walk, Shift to run, Space to jump, mouse to look, Esc to free the cursor, 1–7 to jump between places, R to reset, hold T to run the sun, [ and ] to change the field of view. Without motion sensors, the on-screen stick and drag still work.
 
@@ -67,7 +67,7 @@ Origin is the sphere's axis at natural ground. The front (main stair, tunnel) fa
 | Front stair block | solid block against the upper tier, 79 m wide at the bridge, 21 m at the top, 21 m deep, with a flight of 292 risers of 0.06 units on each side and the small door at its foot |
 | Passages | 3.9 units high and 4.4 wide, level with the terrace, from the arch in the cylinder and from the east and west sides of the drum, each about 100 units long |
 | Floor | a raised floor at 14 units with a low mound to 17 units under the sarcophagus. Each passage ramps up at about 25° and comes out below it |
-| Vault openings | the sky over Woolsthorpe at Newton's birth: each star above the horizon is a long straight bore cut by boolean through the shell, sized by its brightness, aimed at its own fixed spot on the floor |
+| Vault openings | the sky over Woolsthorpe at Newton's birth: each star above the horizon is a long straight bore cut by boolean through the shell, sized by its brightness, aimed at the sarcophagus |
 
 ## The cypresses
 
@@ -119,10 +119,10 @@ If you want a concrete version, swap the `Limestone ashlar` and `Limestone dress
 Nothing inside is painted on. The sun moves across the sky, and everything it does comes from the geometry:
 
 - **Sun:** one light with a shadow map outdoors and in the passages.
-- **Columns inside:** an 8 m bore is a light pipe, not a pinhole. Light can only leave along its axis, so each column and its pool on the floor stay fixed. Only their strength changes: the sky keeps each faintly lit, and sunlight adds to it as the sun nears the bore's line, losing a share at every bounce off the wall. See `web/src/sunshafts.js`. The columns are drawn with the exact length of the view ray inside them.
+- **Columns inside:** an 8 m bore is a light pipe, not a pinhole. Light can only leave along its axis, so each column stays fixed and all of them meet on the sarcophagus. Only their strength changes: the sky keeps each faintly lit, and sunlight adds to it as the sun nears the bore's line, losing a share at every bounce off the wall. See `web/src/sunshafts.js`. The columns are drawn with the exact length of the view ray inside them.
 - **Sky light inside the sphere:** the form factor from every bore to every vertex, plus the exact interreflection for a closed sphere.
 - **Sky light and bounce elsewhere:** path traced in Cycles into the vertices by `scripts/export_web.py`, along with the passage lamps. The bounce is baked from a midday sun, so it doesn't move with the sun.
-- **Exposure:** the eye adapts as you go from daylight into the dark.
+- **Exposure:** one fixed value everywhere, so nothing changes as you cross a threshold. The interior and passages are set to the level the eye would settle at, a fixed multiple of the computed light.
 
 ## Sources
 

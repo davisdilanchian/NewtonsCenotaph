@@ -193,14 +193,12 @@ def bore_flare(r):
     return r * 1.35 + 0.05
 
 def bore_target(d):
-    """Where a star's bore points: its own fixed spot on the floor, the sky laid out round the
-    sarcophagus, overhead stars closest in. Its shaft of light can only ever land here."""
-    h = math.hypot(d.x, d.y) or 1.0
-    reach = 12.0 + 17.0 * (1.0 - d.z)
-    return Vector((d.x / h * reach, d.y / h * reach, D["floor_top"]))
+    """Every bore points at the sarcophagus: all the light in the sphere gathers on Newton, and from
+    the tomb the sky shows through every star."""
+    return Vector((0, 0, D["mound_top"] + 2.0))
 
 def hole_cutter():
-    """Long straight bores through the 8 m shell, each aimed at its spot on the floor."""
+    """Long straight bores through the 8 m shell, all aimed at the sarcophagus."""
     bm = bmesh.new()
     for d, r in star_holes():
         q = Vector((0, 0, D["sphere_cz"])) + d * D["shell_inner_R"]
