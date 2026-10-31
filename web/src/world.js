@@ -516,7 +516,7 @@ export async function loadWorld(renderer, onProgress) {
           const x = pos.getX(v), y = pos.getY(v), z = pos.getZ(v);
           const inFront = Math.abs(x) < 7.3 && z > 0 && z < 110, inSide = Math.abs(z) < 3.5 && Math.abs(x) < 125;
           const depth = y < 14.1 ? (inFront ? 108 - z : inSide ? 121 - Math.abs(x) : 0) : 0, k = 1 + (PASSAGES - 1) * smooth(0, 14, depth);
-          const least = name === 'Basin coping' ? 0.16 : 0;   // its sides meet the ground, where the bake's vertices went dark
+          const least = name === 'Basin coping' ? 0.55 : 0;   // its sides meet the ground, where the bake's vertices went dark
           baked[v * 3] = Math.max(c.getX(v) * k, least); baked[v * 3 + 1] = Math.max(c.getY(v) * k, least); baked[v * 3 + 2] = Math.max(c.getZ(v) * k, least);
         }
         g.setAttribute('baked', new THREE.BufferAttribute(baked, 3));
