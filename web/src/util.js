@@ -3,9 +3,9 @@ export const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 export const lerp = (a, b, t) => a + (b - a) * t;
 export const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 
-// The model is built to the published 150 m. People, stone courses and ground grain are drawn
-// at 1/SCALE, so the monument reads SCALE times larger. 3 is the largest at which the cypresses
-// stay a real height, 30 m. Try another with ?scale=5.
+// The monument is its published 150 m. Screens shrink the sense of size, so the walker, the visitors,
+// the stone courses and the ground grain are drawn at 1/SCALE, which puts the camera lower and slows
+// it. Try another with ?scale=2, or ?scale=1 for true eye height.
 export const SCALE = clamp(+new URLSearchParams(location.search).get('scale') || 3, 1, 8);
 
 export function rng(seed) {

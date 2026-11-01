@@ -41,17 +41,39 @@ export function makeSunshafts(holeBuffer) {
         if (h <= 0.0) discard;
         float edge = sqrt(h) / (a * vR);             // 1 down the middle of the column, 0 at its edge
         float meet = 1.0 - 0.8 * smoothstep(0.5, 1.0, vAlong);   // they overlap as they converge: each gives way so the sum stays gentle
-        gl_FragColor = vec4(tint * edge * edge * vR * vGlow * meet * 0.055, 1.0);
+        gl_FragColor = vec4(tint * edge * edge * vR * vGlow * meet * 0.009, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`,
   }));
   column.frustumCulled = false;
 
+  // every opening glows with the daylight coming through it, however faint its star
+  const seen = new THREE.BufferGeometry(), at = new Float32Array(n * 3), size = new Float32Array(n), d = new THREE.Vector3();
+  for (let i = 0; i < n; i++) {
+    d.fromArray(data, i * 4).multiplyScalar(R - 1).add(C);
+    at.set([d.x, d.y, d.z], i * 3);
+    size[i] = data[i * 4 + 3];
+  }
+  seen.setAttribute('position', new THREE.BufferAttribute(at, 3));
+  seen.setAttribute('size', new THREE.BufferAttribute(size, 1));
+  const scale = { value: 800 };
+  const glows = new THREE.Points(seen, new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { scale },
+    vertexShader: `attribute float size; uniform float scale; varying float vBright;
+      void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = clamp(size * 9.0 * scale / -mv.z, 7.0, 46.0);
+        vBright = 0.35 + 1.5 * size; gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `varying float vBright;
+      void main(){ float d = length(gl_PointCoord - 0.5) * 2.0, core = exp(-d * d * 26.0), halo = exp(-d * d * 5.0) * (1.0 - d);
+        gl_FragColor = vec4(vec3(0.82, 0.9, 1.0) * (core * 1.5 + max(halo, 0.0) * 0.3) * vBright, 1.0); }`,
+  }));
+  glows.frustumCulled = false;
+
   const mesh = new THREE.Group();
-  mesh.add(column);
+  mesh.add(column, glows);
   return {
     mesh,
+    scale,
     update(sun, light) {
       let total = 0;
       bores.forEach((b, i) => {

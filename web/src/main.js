@@ -28,7 +28,7 @@ addEventListener('resize', () => {
 });
 
 const DAY = 2400;                               // seconds for the sun to cross the sky
-const metres = (v) => `${Math.round(v * SCALE)} m`;
+const metres = (v) => `${Math.round(v)} m`;
 
 // Places, as feet position and what you face on arrival.
 const PLACES = [
@@ -231,11 +231,12 @@ function tick(dt) {
   shadowClock -= dt;
   if (shadowClock <= 0 || keys.has('KeyT')) {
     shadowClock = inVoid ? 1 : 20;
-    if (inVoid) { lightProbe.color.copy(world.sun.color); lightProbe.intensity = world.sunStrength(); world.tomb.intensity = world.shafts.update(SUN, lightProbe) * 24; } else { world.tomb.intensity = 0; world.refresh(); }
+    if (inVoid) { lightProbe.color.copy(world.sun.color); lightProbe.intensity = world.sunStrength(); world.tomb.intensity = world.shafts.update(SUN, lightProbe) * 14; } else { world.tomb.intensity = 0; world.refresh(); }
   }
 
   world.water.material.uniforms.time.value = time;
   world.lamps.material.uniforms.t.value = time;
+  world.shafts.scale.value = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
   world.lamps.material.uniforms.scale.value = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
   world.sky.material.uniforms.time.value = time;
   world.fire.update(dt, time, camera);
@@ -315,8 +316,8 @@ async function start() {
   bindControls();
 
   $('about').innerHTML = SCALE === 1
-    ? 'This is the published size: a sphere 150 m wide. <a href="./">Walk it at three times that</a>, the size at which it feels right on a screen.'
-    : `Published accounts put the sphere at 150 m, which the figures in his drawings bear out. A screen fills only a fraction of your view and shrinks that sense of size, so this walk stands it ${metres(150)} wide to feel as it would in person. <a href="?scale=1">Walk it at the published size</a>.`;
+    ? 'You stand here at true eye height against the 150 m sphere. Screens make large things look small, so it feels smaller than it would in person. <a href="./">Use the corrected camera</a>.'
+    : 'The sphere is 150 m across, as published and as the figures in his drawings bear out. Screens and games make large things look small, so the camera here stands lower and moves slower to give back the sense of size, and visitors are drawn to match. <a href="?scale=1">See it at true eye height</a>.';
   arrive(PLACES[0]);
   world.trees.updateLOD(1e6, 1e6, 75);          // every tree in the shadow map
   world.fire.update(0.016, 0, camera);
