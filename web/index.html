@@ -49,6 +49,12 @@
   #places button { padding: 3px 4px; opacity: .78; transition: opacity .15s; }
   #places button:hover, #places button:focus-visible { opacity: 1; outline: none; text-decoration: underline; text-underline-offset: 3px; }
   #places kbd { font: inherit; opacity: .6; margin-left: 7px; }
+  #music { position: absolute; right: 16px; bottom: 14px; padding: 5px 9px; border-radius: 3px; background: rgba(12, 15, 20, .3); pointer-events: auto; opacity: .78; transition: opacity .15s; }
+  #music:hover, #music:focus-visible { opacity: 1; outline: none; }
+  #music[aria-pressed="false"] { text-decoration: line-through; text-decoration-thickness: 1px; opacity: .55; }
+  #music kbd { font: inherit; opacity: .6; margin-left: 7px; }
+  .touch #music kbd { display: none; }
+  .no-sensors #music { bottom: 116px; }
   #keys { position: absolute; left: 22px; bottom: 18px; line-height: 1.75; opacity: .82; transition: opacity 1s; }
   #keys.faded { opacity: 0; }
   #keys b { font-weight: 500; }
@@ -75,6 +81,7 @@
   </figure>
   <h1>Cénotaphe de Newton</h1>
   <p>In 1784, five years before the Revolution, Paris was captivated by Enlightenment science. The Montgolfier brothers had just flown the first balloons, and Newton, dead since 1727, had become the hero of reason. The architect Étienne-Louis Boullée answered with a design no one had asked for: a hollow sphere for Newton's tomb, its vault pierced so that daylight would fall through as stars. It was never built. Here the openings follow the real sky over Woolsthorpe on the night Newton was born.</p>
+  <p>The music is the opening of Haydn’s <i>Creation</i> (1798): chaos, and then “Let there be light”, the words Alexander Pope turned into Newton’s epitaph: “Nature and Nature’s laws lay hid in night; God said, Let Newton be! and all was light.” Sound on.</p>
   <p id="about">Published accounts put the sphere at 150 m.</p>
   <div id="bar"><i></i></div>
   <button id="enter" hidden>Enter</button>
@@ -83,10 +90,11 @@
 <div id="hud">
   <div id="where"><span id="whereName"></span><small id="whereNote"></small></div>
   <nav id="places" aria-label="Go to a place"></nav>
-  <div id="keys"><b>WASD</b> walk &nbsp;·&nbsp; <b>Shift</b> run &nbsp;·&nbsp; <b>Space</b> jump &nbsp;·&nbsp; <b>Mouse</b> look &nbsp;·&nbsp; <b>Esc</b> free the cursor &nbsp;·&nbsp; <b>Hold T</b> run the sun &nbsp;·&nbsp; <b>[ ]</b> field of view</div>
+  <div id="keys"><b>WASD</b> walk &nbsp;·&nbsp; <b>Shift</b> run &nbsp;·&nbsp; <b>Space</b> jump &nbsp;·&nbsp; <b>Mouse</b> look &nbsp;·&nbsp; <b>Esc</b> free the cursor &nbsp;·&nbsp; <b>Hold T</b> run the sun &nbsp;·&nbsp; <b>[ ]</b> field of view &nbsp;·&nbsp; <b>M</b> music</div>
   <div id="phone">Turn to look, and walk to move</div>
   <div id="stick"><i></i></div>
   <button id="jump">Jump</button>
+  <button id="music" aria-label="Music" aria-pressed="true">♪ Haydn<kbd>M</kbd></button>
 </div>
 <script type="module" src="app.js"></script>
 </body>

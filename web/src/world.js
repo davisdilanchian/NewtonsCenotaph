@@ -116,9 +116,13 @@ function stoneUVs(source, tile, sphere) {
  */
 // One exposure serves the whole site, so the dark interior is set permanently to where the eye would
 // settle in it, rather than changing the camera as you cross a threshold.
-const INDOORS = 264, PASSAGES = 11;
+const INDOORS = 1000, PASSAGES = 11;
 
-function skyThroughHoles(buffer, geometries) {
+// The vault is painted black, so almost all the light that bounces round the void comes off the floor
+// and the tomb, a twentieth of its surface: the void as a whole reflects about this much.
+const VOID_ALBEDO = 0.07;
+
+function skyThroughHoles(buffer, geometries, painted) {
   const count = new Uint32Array(buffer, 0, 1)[0], data = new Float32Array(buffer, 4, count * 4), STRIDE = 3;
   const hx = [], hy = [], hz = [], dx = [], dy = [], dz = [], area = [];
   for (let i = 0; i < count; i += STRIDE) {
@@ -128,7 +132,8 @@ function skyThroughHoles(buffer, geometries) {
     area.push(Math.PI * (0.9 * r) ** 2 * STRIDE);
   }
   let sum = 0, verts = 0;
-  const fields = geometries.map((g) => {
+  const fields = [...geometries, ...painted].map((g, i) => {
+    const counted = i < geometries.length;
     const p = g.attributes.position, n = g.attributes.normal, E = new Float32Array(p.count);
     for (let v = 0; v < p.count; v += 3) {            // one value per triangle corner set keeps this quick
       const x = p.getX(v), y = p.getY(v), z = p.getZ(v), nx = n.getX(v), ny = n.getY(v), nz = n.getZ(v);
@@ -138,12 +143,13 @@ function skyThroughHoles(buffer, geometries) {
         const at = nx * vx + ny * vy + nz * vz, from = dx[h] * vx + dy[h] * vy + dz[h] * vz;
         if (at > 0 && from > 0) e += area[h] * at * from / (Math.PI * d2 * d2);
       }
-      E[v] = E[v + 1] = E[v + 2] = e; sum += e; verts++;
+      E[v] = E[v + 1] = E[v + 2] = e;
+      if (counted) { sum += e; verts++; }
     }
     return E;
   });
-  const albedo = 0.45, shared = (sum / verts) * albedo / (1 - albedo);
-  geometries.forEach((g, i) => {
+  const shared = (sum / verts) * VOID_ALBEDO / (1 - VOID_ALBEDO);
+  [...geometries, ...painted].forEach((g, i) => {
     const E = fields[i], baked = new Float32Array(E.length * 3);
     for (let v = 0; v < E.length; v++) { const e = (E[v] + shared) * INDOORS; baked[v * 3] = e * 0.74; baked[v * 3 + 1] = e * 0.86; baked[v * 3 + 2] = e; }
     g.setAttribute('baked', new THREE.BufferAttribute(baked, 3));
@@ -355,6 +361,71 @@ function makeLamps(buffer) {
   return flames;
 }
 
+/**
+ * Ptolemy's constellations painted on the black vault in pale gold: lines from star to star that stop
+ * short of each opening, as on a star chart, and their Latin names in Roman capitals.
+ */
+function makeFigures(list) {
+  const R = 66.9, HALF = 0.11, GAP = 1.1, LETTER = 1.6, pos = [], uv = [], nor = [];
+  const dir = (d) => new THREE.Vector3(d[0], d[2], -d[1]).normalize();
+  const solid = [0.996, 0.002];                     // a white corner of the lettering atlas
+  const quad = (a, b, c, d, ua, ub, uc, ud) => {        // corners relative to the sphere's centre
+    for (const [p, t] of [[a, ua], [b, ub], [c, uc], [a, ua], [c, uc], [d, ud]]) {
+      pos.push(p.x + CENTER.x, p.y + CENTER.y, p.z + CENTER.z); uv.push(t[0], t[1]);
+      const n = p.clone().normalize().negate(); nor.push(n.x, n.y, n.z);
+    }
+  };
+  const p = new THREE.Vector3(), q = new THREE.Vector3(), side = new THREE.Vector3();
+  for (const c of list) for (const [a, b, real] of c.segs) {
+    const A = dir(a), B = dir(b), w = A.angleTo(B), t0 = real[0] ? GAP / R / w : 0, t1 = 1 - (real[1] ? GAP / R / w : 0);
+    if ((t1 - t0) * w * R < 0.4) continue;
+    const steps = Math.max(1, Math.ceil(((t1 - t0) * w) / 0.012));
+    const at = (t) => new THREE.Vector3().copy(A).multiplyScalar(Math.sin((1 - t) * w)).addScaledVector(B, Math.sin(t * w)).divideScalar(Math.sin(w)).multiplyScalar(R);
+    for (let i = 0; i < steps; i++) {
+      p.copy(at(t0 + ((t1 - t0) * i) / steps)); q.copy(at(t0 + ((t1 - t0) * (i + 1)) / steps));
+      side.subVectors(q, p).cross(p).normalize().multiplyScalar(HALF);
+      quad(p.clone().sub(side), q.clone().sub(side), q.clone().add(side), p.clone().add(side), solid, solid, solid, solid);
+    }
+  }
+
+  // the names, drawn into one atlas and bent onto the sphere
+  const named = list.filter((c) => c.name), ROW = 80, canvas = document.createElement('canvas');
+  canvas.width = 1024; canvas.height = 2048;
+  const x = canvas.getContext('2d');
+  x.fillStyle = '#fff'; x.fillRect(1016, 2040, 8, 8);
+  x.font = `500 ${ROW * 0.72}px Didot, "Bodoni 72", Georgia, "Times New Roman", serif`;
+  x.textBaseline = 'middle';
+  const up = new THREE.Vector3(0, 1, 0), north = new THREE.Vector3(0, 0, -1), U = new THREE.Vector3(), Rt = new THREE.Vector3();
+  named.forEach((c, row) => {
+    let width = 0;
+    const spacing = ROW * 0.16, glyphs = [...c.name].map((ch) => { const w = x.measureText(ch).width; const g = { ch, at: width }; width += w + spacing; return g; });
+    width -= spacing;
+    const scale = Math.min(1, 1000 / width);
+    x.save(); x.translate(12, row * ROW + ROW / 2); x.scale(scale, 1);
+    for (const g of glyphs) x.fillText(g.ch, g.at, 0);
+    x.restore();
+    const u1 = (12 + width * scale) / 1024, v0 = 1 - ((row + 1) * ROW) / 2048, v1 = v0 + ROW / 2048;
+    const D = dir(c.at);
+    U.copy(up).addScaledVector(D, -D.dot(up));
+    if (U.length() < 0.2) U.copy(north).addScaledVector(D, -D.dot(north));
+    U.normalize(); Rt.crossVectors(D, U).normalize();
+    const H = LETTER / 0.72, W = (H * width) / ROW, cols = Math.ceil(W / 1.2);
+    const onSphere = (s, h) => D.clone().multiplyScalar(R).addScaledVector(Rt, (s - 0.5) * W).addScaledVector(U, (h - 0.5) * H).setLength(R);
+    for (let i = 0; i < cols; i++) {
+      const s0 = i / cols, s1 = (i + 1) / cols, a = (12 / 1024) + (u1 - 12 / 1024) * s0, b = (12 / 1024) + (u1 - 12 / 1024) * s1;
+      quad(onSphere(s0, 0), onSphere(s1, 0), onSphere(s1, 1), onSphere(s0, 1), [a, v0], [b, v0], [b, v1], [a, v1]);
+    }
+  });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  const atlas = new THREE.CanvasTexture(canvas);
+  atlas.colorSpace = THREE.SRGBColorSpace; atlas.anisotropy = 4;
+  const paint = weathered(new THREE.MeshStandardMaterial({ color: new THREE.Color(0.8, 0.6, 0.3), map: atlas, alphaTest: 0.35, roughness: 0.6, metalness: 0 }), { streaks: 0 });
+  return new THREE.Mesh(g, paint);
+}
+
 /** The brazier: a turbulent flame, sparks and smoke, and a real light thrown on the stone round it. */
 function makeFire() {
   const group = new THREE.Group();
@@ -473,7 +544,7 @@ export async function loadWorld(renderer, onProgress) {
   const dressed = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.5), roughness: 0.74 }), { streaks: 0.4 });
   const boreStone = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.8 }), { streaks: 0, level: 1.5 });   // the bake's vertices are too few for these narrow bores
   const sphere = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.25), roughness: 0.72, envMapIntensity: 0.45 }), { courses: true });
-  const vault = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.9, dithering: true }), { courses: true, streaks: 0.6 });
+  const vault = weathered(std({ color: new THREE.Color(0.05, 0.05, 0.053), map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.88, dithering: true }), { courses: true, streaks: 0 });   // painted black, so the stars stand out
   const paving = weathered(std({ color: LIMESTONE, map: T('paving', true), normalMap: T('paving_n'), normalScale: nS(0.7) }), { streaks: 0 });
   const gravel = weathered(std({ color: new THREE.Color(1.22, 1.08, 0.88), map: T('gravel', true), normalMap: T('gravel_n'), normalScale: nS(0.5), roughness: 0.94 }), { streaks: 0 });
   const soil = std({ map: T('soil', true), roughness: 0.97 });
@@ -489,8 +560,8 @@ export async function loadWorld(renderer, onProgress) {
   const draco = new DRACOLoader(manager).setDecoderPath('./draco/');
   const gltfLoader = new GLTFLoader(manager).setDRACOLoader(draco);
   const fileLoader = new THREE.FileLoader(manager).setResponseType('arraybuffer');
-  const [gltf, treeBuf, holeBuf, lampBuf] = await Promise.all([gltfLoader.loadAsync('assets/monument.glb'), fileLoader.loadAsync('assets/trees.bin'),
-    fileLoader.loadAsync('assets/holes.bin'), fileLoader.loadAsync('assets/lamps.bin')]);
+  const [gltf, treeBuf, holeBuf, lampBuf, figureList] = await Promise.all([gltfLoader.loadAsync('assets/monument.glb'), fileLoader.loadAsync('assets/trees.bin'),
+    fileLoader.loadAsync('assets/holes.bin'), fileLoader.loadAsync('assets/lamps.bin'), new THREE.FileLoader(manager).setResponseType('json').loadAsync('assets/constellations.json')]);
   draco.dispose();
 
   const root = gltf.scene, solids = [];
@@ -529,8 +600,9 @@ export async function loadWorld(renderer, onProgress) {
     mesh.castShadow = key !== 'Planting bed (soil, needle litter)';
     mesh.receiveShadow = true;
   }
-  skyThroughHoles(holeBuf, inside);
-  scene.add(root);
+  const figures = makeFigures(figureList);
+  skyThroughHoles(holeBuf, inside, [figures.geometry]);
+  scene.add(root, figures);
 
   const collider = mergeGeometries(solids);
   const bvh = new MeshBVH(collider);

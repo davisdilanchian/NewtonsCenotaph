@@ -41,7 +41,7 @@ export function makeSunshafts(holeBuffer) {
         if (h <= 0.0) discard;
         float edge = sqrt(h) / (a * vR);             // 1 down the middle of the column, 0 at its edge
         float meet = 1.0 - 0.8 * smoothstep(0.5, 1.0, vAlong);   // they overlap as they converge: each gives way so the sum stays gentle
-        gl_FragColor = vec4(tint * edge * edge * vR * vGlow * meet * 0.009, 1.0);
+        gl_FragColor = vec4(tint * edge * edge * vR * vGlow * meet * 0.006, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`,

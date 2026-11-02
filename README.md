@@ -6,7 +6,7 @@ A to-scale 3D model of Étienne-Louis Boullée's *Cénotaphe de Newton* (1784), 
 
 The monument is its published 150 m, and the figures in the drawings measure about 130–180 m. Screens and games make large things look small, because a screen fills only a fraction of your view, so the page corrects for that with its camera: the walker, the visitors, the stone courses and the ground grain are drawn at a third of true size, which lowers the eye and slows the walk. Add `?scale=1` to the address for true eye height.
 
-On a phone, turn to look and walk for real to move: the page counts your steps. Elsewhere: WASD to walk, Shift to run, Space to jump, mouse to look, Esc to free the cursor, 1–7 to jump between places, R to reset, hold T to run the sun, [ and ] to change the field of view. Without motion sensors, the on-screen stick and drag still work.
+On a phone, turn to look and walk for real to move: the page counts your steps. Elsewhere: WASD to walk, Shift to run, Space to jump, mouse to look, Esc to free the cursor, 1–8 to jump between places, R to reset, hold T to run the sun, [ and ] to change the field of view, M to turn the music on or off. Without motion sensors, the on-screen stick and drag still work.
 
 ## Folder
 
@@ -22,6 +22,8 @@ On a phone, turn to look and walk for real to move: the page counts your steps. 
 | `scripts/export_glb.py` | Writes the .glb |
 | `scripts/export_web.py` | Writes the page's compressed monument, walk colliders and tree positions |
 | `scripts/make_web_textures.py` | Generates the page's tiling stone, ground and foliage textures |
+| `web/public/assets/constellations.json` | The painted figures on the vault, made by `web/tools/birth_sky.mjs` |
+| `web/public/assets/music/` | The page's music (see Sound) |
 | `web/` | The walkable page. `.github/workflows/pages.yml` builds and deploys it on every push to `web/` |
 | `docs/dimensions.json` | The dimensions and tree counts the last build used |
 
@@ -95,7 +97,7 @@ Boullée designed this in 1784, before modern concrete, as cut stone. The model 
 - **Drum and terrace walls:** coursed limestone ashlar, about 2.6 × 1.3 m blocks with fine joints, as drawn on the elevation. Paris Lutetian limestone colour, with weathering.
 - **Sphere, cornices, stairs, sculpture:** smooth dressed limestone, with faint vertical rain streaks on the sphere.
 - **Terrace walks:** limestone paving on the ground terrace and gravel on the upper terraces. The trees stand in soil beds.
-- **Inside the vault:** Boullée pierced the shell so daylight would show as stars. Here they are real bores through plain stone, placed from the sky at Newton's birth, with the Moon as the largest opening.
+- **Inside the vault:** Boullée pierced the shell so daylight would show as stars. Here they are real bores through stone painted black, placed from the sky at Newton's birth, with the Moon as the largest opening. On the page, Ptolemy's constellations are painted round them in pale gold, with their Latin names.
 
 If you want a concrete version, swap the `Limestone ashlar` and `Limestone dressed` materials in the .blend. The shapes don't change.
 
@@ -106,6 +108,7 @@ If you want a concrete version, swap the `Limestone ashlar` and `Limestone dress
 - The front stairs are read as a solid block standing against the upper tier, not a V cut into it. A cut left the tier overhanging its own stairs, and the block fits the hatched band in front of the tier on the plan and the door at the foot of the trapezoid on the elevation.
 - The drawings show no stair from the ground terrace up to the drum terrace, so the page has none. Its number keys jump there instead.
 - The section (sheet 04) shows a long, low passage at terrace level, rising to the sarcophagus. I read it as cross-section through the east and west, with the elevation's arch as the front way in.
+- The painted constellations are my addition too: Ptolemy's 48, the figures Newton knew (the Argo still one ship), as stick figures from [d3-celestial](https://github.com/ofrohn/d3-celestial) (BSD-3-Clause). Each corner is a catalogue star moved back to 1643, so it lands on its opening; 33 of the 48 are above the horizon that night.
 - The vault's stars are my addition to the idea: `web/tools/birth_sky.mjs` places them from the HYG catalogue for 25 Dec 1642 (Julian) at Woolsthorpe, corrected for proper motion and precession. No reliable source records the hour, so 2 a.m. is an assumption. South lies over the front.
 - The inscription is my wording, echoing Newton's Westminster Abbey epitaph: ISAACO NEWTONO / QVI NATVRAE LEGES PATEFECIT / HVMANI GENERIS DECVS. The sheet shows only faint lines there.
 - The oil lamps in the passages are my addition: without them the middle of a passage is pitch dark.
@@ -120,9 +123,15 @@ Nothing inside is painted on. The sun moves across the sky, and everything it do
 
 - **Sun:** one light with a shadow map outdoors and in the passages.
 - **Columns inside:** an 8 m bore is a light pipe, not a pinhole. Light can only leave along its axis, so each column stays fixed and all of them meet on the sarcophagus. Only their strength changes: the sky keeps each faintly lit, and sunlight adds to it as the sun nears the bore's line, losing a share at every bounce off the wall. See `web/src/sunshafts.js`. The columns are drawn with the exact length of the view ray inside them.
-- **Sky light inside the sphere:** the form factor from every bore to every vertex, plus the exact interreflection for a closed sphere.
+- **Sky light inside the sphere:** the form factor from every bore to every vertex, plus the exact interreflection for a closed sphere. With the vault painted black, almost all of that bounce comes off the floor and the tomb.
 - **Sky light and bounce elsewhere:** path traced in Cycles into the vertices by `scripts/export_web.py`, along with the passage lamps. The bounce is baked from a midday sun, so it doesn't move with the sun.
 - **Exposure:** one fixed value everywhere, so nothing changes as you cross a threshold. The interior and passages are set to the level the eye would settle at, a fixed multiple of the computed light.
+
+## Sound
+
+Every footstep is synthesised for what is underfoot (limestone, the gravel walks, or the meadow) and played through the echo of the space you're in: open air, a stone passage 4.4 m wide with its flutter between the walls, or the sphere, whose 13-second echo gathers back to the middle. The echoes are computed in the page from each room's size; see `web/src/sound.js`. On a phone, each real step you take makes one footfall.
+
+The music is the opening of Haydn's *The Creation* (1798): "The Representation of Chaos" and "In the beginning", where the chorus sings "and there was light". Alexander Pope's epitaph for Newton turns the same verse: "Nature and Nature's laws lay hid in night; God said, Let Newton be! and all was light." The recording is by St Matthew's Choir, conducted by Phiroz Dalal, released into the public domain ([Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Haydn_-_The_Creation_(Dalal)_-_1_The_Representation_of_Chaos.oga), from archive.org). The two movements are joined and converted to AAC for the page.
 
 ## Sources
 
@@ -132,6 +141,6 @@ Nothing inside is painted on. The sun moves across the sky, and everything it do
 - [The Marginalian on the cenotaph](https://www.themarginalian.org/2021/03/18/etienne-louis-boullee-newton-cenotaph/)
 - [UT Pictura18: perspective elevation record](https://utpictura18.univ-amu.fr/en/notice/10256-newton-cenotaph-project-perspective-elevation-etienne-louis-boullee)
 
-The page uses [three.js](https://threejs.org/) (MIT), [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) (MIT) and Draco (Apache-2.0).
+The page uses [three.js](https://threejs.org/) (MIT), [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) (MIT) and Draco (Apache-2.0). The star catalogue is [HYG v4.1](https://github.com/astronexus/HYG-Database) (CC BY-SA 4.0), and the constellation figures are from d3-celestial (BSD-3-Clause, © 2015 Olaf Frohn; licence in `web/public/assets/constellations.LICENSE.txt`).
 
 Built 2026-10-25.

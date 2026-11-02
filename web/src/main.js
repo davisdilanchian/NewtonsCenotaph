@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { loadWorld, groundHeight, CENTER, SUN } from './world.js';
 import { Player, RADIUS, WALK, RUN } from './player.js';
 import { clamp, lerp, SCALE } from './util.js';
+import { makeSound } from './sound.js';
 
 const $ = (id) => document.getElementById(id);
 const debug = new URLSearchParams(location.search).has('debug');
@@ -84,6 +85,8 @@ const keys = new Set();
 const input = { x: 0, y: 0, run: false, jump: false };
 const touchMove = { x: 0, y: 0 };
 const EYE = 1.63 / SCALE;
+const sound = makeSound();
+let pace = 0, footfall = false, landing = 0;
 let time = 0, stride = 0, bob = 0, lodAt = new THREE.Vector2(1e9, 1e9), lodClock = 0, started = false;
 
 
@@ -108,7 +111,7 @@ function startPhoneSensors() {
       if (!a || a.x === null) return;
       const size = Math.hypot(a.x, a.y, a.z), rise = size - level, now = performance.now();
       level += (size - level) * 0.05;
-      if (armed && rise > 1.3 && now - last > 320) { stepping = STEP_TIME; last = now; armed = false; } else if (rise < 0.3) armed = true;
+      if (armed && rise > 1.3 && now - last > 320) { stepping = STEP_TIME; footfall = true; last = now; armed = false; } else if (rise < 0.3) armed = true;
     });
   };
   const askTurn = window.DeviceOrientationEvent?.requestPermission, askSteps = window.DeviceMotionEvent?.requestPermission;   // iPhones ask first, and only from a tap
@@ -152,9 +155,35 @@ function underground() {
   return player.feet < 13.9 && (Math.abs(x) < 7.2 && z > 0 && z < 105 || Math.abs(z) < 3.5 && r < 119);
 }
 
+// what is underfoot, from the plan: paving and stairs, the gravel walks, or the meadow
+function surface() {
+  const { x, z } = player.pos, feet = player.feet, ax = Math.abs(x);
+  if (inSphere() || underground()) return 'stone';
+  if (feet > 63.5) return 'gravel';
+  if (feet > 47) return 'stone';
+  if (feet > 44) return ax < 45 && z > 95 ? 'stone' : 'gravel';
+  if (feet > 0.6) return 'stone';
+  if (ax < 40 && z > 157 && z < 205 || ax > 22 && ax < 30 && z > 205 && z < 720 || ax < 40 && z > 720 && z < 745) return 'gravel';
+  return ax >= 20 && ax <= 22 && z > 205 && z < 720 ? 'stone' : 'grass';
+}
+
+// a footfall for each step taken, one for each real step on a phone, and a heavier one on landing
+function footsteps(dt) {
+  if (!started) return;
+  if (player.airTime > 0.25) landing = Math.max(landing, player.airTime);
+  else if (landing && player.airTime === 0) { sound.step(surface(), clamp(0.8 + landing, 1, 1.6)); landing = 0; pace = 0; }
+  if (footfall) { footfall = false; sound.step(surface(), 0.9); return; }
+  if (stepping > 0 || player.airTime > 0.12 || player.speed < 0.2 * WALK) { pace = 0.5; return; }
+  pace += dt * Math.min((player.speed * SCALE) / 1.5, 3.4);     // a pace of about 1.5 m, at most 3.4 a second
+  if (pace >= 1) { pace -= 1; sound.step(surface(), clamp(0.6 + (0.4 * player.speed) / RUN, 0.6, 1)); }
+}
+
+// in the void: anywhere above the floor inside the shell, right out to its foot
+function inSphere() { return player.pos.distanceTo(CENTER) < 67 && !underground(); }
+
 function placeLabel(feet) {
-  const r = Math.hypot(player.pos.x, player.pos.z), d = player.pos.distanceTo(CENTER);
-  if (d < 66.5) return PLACES[3];
+  const r = Math.hypot(player.pos.x, player.pos.z);
+  if (inSphere()) return PLACES[3];
   if (underground()) return PLACES[2];
   if (feet > 60) return PLACES[6];
   if (feet > 44) return r > 105 || Math.abs(player.pos.x) > 45 ? PLACES[5] : PLACES[4];
@@ -217,6 +246,7 @@ function tick(dt) {
   time += dt;
   if (started) simulate(dt);
   updateCamera(dt);
+  footsteps(dt);
 
   const p = player.pos;
   // the sun crosses the sky and back; holding T hurries it along
@@ -224,7 +254,8 @@ function tick(dt) {
   const leg = dayClock % 2;
   world.setSun(leg < 1 ? leg : 2 - leg);
 
-  const inVoid = p.distanceTo(CENTER) < 66.5;
+  const inVoid = inSphere();
+  sound.setRoom(inVoid ? 'void' : underground() ? 'passage' : 'open');
   if (inVoid !== wasInVoid) { wasInVoid = inVoid; shadowClock = 0; }
   world.shadowsClose(inVoid);
   world.shafts.mesh.visible = inVoid;
@@ -258,6 +289,7 @@ function bindControls() {
     keys.add(e.code);
     if (e.code === 'Space') { input.jump = true; e.preventDefault(); }
     if (e.code === 'KeyR') teleport(0);
+    if (e.code === 'KeyM') toggleMusic();
     if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
       FOV = clamp(FOV + (e.code === 'BracketRight' ? 5 : -5), 35, 100);
       $('whereNote').textContent = `Field of view ${FOV}°`;
@@ -302,12 +334,21 @@ function bindControls() {
   });
   $('jump').addEventListener('touchstart', (e) => { input.jump = true; e.preventDefault(); }, { passive: false });
 
+  $('music').addEventListener('click', toggleMusic);
+  showMusic();
   PLACES.forEach((p, i) => {
     const b = document.createElement('button');
     b.innerHTML = `${p.name}<kbd>${i + 1}</kbd>`;
     b.addEventListener('click', () => teleport(i));
     $('places').append(b);
   });
+}
+
+function showMusic() { $('music').setAttribute('aria-pressed', sound.musicOn); }
+function toggleMusic() {
+  const on = sound.toggleMusic();
+  showMusic();
+  $('whereNote').textContent = on ? 'Music: Haydn, The Creation, “Chaos” and “Let there be light”' : 'Music off';
 }
 
 async function start() {
@@ -325,7 +366,7 @@ async function start() {
   renderer.compile(world.scene, camera);
   updateCamera(0.016);
   renderer.render(world.scene, camera);
-  if (debug) window.walk = { player, keys, input, world, camera, teleport, renderer, fps: 0, PLACES, simulate, tick, look, gyro, step: () => { stepping = STEP_TIME; } };
+  if (debug) window.walk = { player, keys, input, world, camera, teleport, renderer, fps: 0, PLACES, simulate, tick, look, gyro, sound, surface, step: () => { stepping = STEP_TIME; footfall = true; } };
   frame();
 
   $('bar').style.display = 'none';
@@ -337,6 +378,7 @@ async function start() {
     $('intro').classList.add('gone');
     $('hud').classList.add('on');
     started = true;
+    sound.start();
     if (touch) startPhoneSensors();
     else canvas.requestPointerLock?.()?.catch?.(() => {});
   });

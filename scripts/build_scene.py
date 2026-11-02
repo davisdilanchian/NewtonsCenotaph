@@ -497,10 +497,11 @@ def mat_bark():
     return mat_simple("Cypress bark", (0.12, 0.07, 0.045, 1), 0.9)
 
 def mat_stars(name="Vault: pierced shell (star holes)"):
-    """Plain dark stone. The stars are the real bores cut through it."""
+    """Stone painted black, so the stars stand out. The stars are the real bores cut through it.
+    The page also paints Ptolemy's constellations on it in gold (web/src/world.js)."""
     m = bpy.data.materials.new(name); m.use_nodes = True
     n = m.node_tree.nodes["Principled BSDF"]
-    n.inputs["Base Color"].default_value = (0.42, 0.38, 0.32, 1)
+    n.inputs["Base Color"].default_value = (0.04, 0.04, 0.042, 1)
     n.inputs["Roughness"].default_value = 0.9
     return m
 
