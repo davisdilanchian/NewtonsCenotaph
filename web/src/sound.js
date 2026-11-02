@@ -103,7 +103,7 @@ export function makeSound() {
     const at = ctx.currentTime + 0.005, r = () => 0.85 + Math.random() * 0.3, out = ctx.createGain(), pan = ctx.createStereoPanner();
     foot ^= 1;
     pan.pan.value = foot ? 0.12 : -0.12;
-    out.gain.value = 1.3 * strength;
+    out.gain.value = 0.15 * strength;                                  // heard, not noticed: well under the music
     out.connect(pan).connect(dry);
     for (const r0 of Object.values(rooms)) pan.connect(r0.send);
     if (surface === 'stone') {
