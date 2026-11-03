@@ -79,7 +79,7 @@ function showSheets() {
     sheetTimer = setInterval(() => pick((current + 1) % SHEETS.length), 6000);
 }
 
-let world, player, dayClock = 0.2, shadowClock = 0, wasInVoid = false;
+let world, player, dayClock = 0.2, shadowClock = 0, wasInVoid = false, shaftLight = 0;
 const lightProbe = { color: new THREE.Color(), intensity: 1 };
 const keys = new Set();
 const input = { x: 0, y: 0, run: false, jump: false };
@@ -258,12 +258,18 @@ function tick(dt) {
   sound.setRoom(inVoid ? 'void' : underground() ? 'passage' : 'open');
   if (inVoid !== wasInVoid) { wasInVoid = inVoid; shadowClock = 0; }
   world.shadowsClose(inVoid);
-  world.shafts.mesh.visible = inVoid;
+  // the bores' light rises and falls over a second and a half, seen from the passage as well as inside
+  const near = inVoid || (underground() && Math.hypot(p.x, p.z) < 90);
+  shaftLight = clamp(shaftLight + (near ? dt : -dt) / 1.5, 0, 1);
+  world.shafts.fade.value = shaftLight * shaftLight * (3 - 2 * shaftLight);
+  world.shafts.mesh.visible = shaftLight > 0;
+  if (shaftLight > 0) {
+    lightProbe.color.copy(world.sun.color); lightProbe.intensity = world.sunStrength();
+    world.tomb.intensity = world.shafts.update(SUN, lightProbe) * 14 * world.shafts.fade.value;
+  } else world.tomb.intensity = 0;
+  // outdoors the sun's shadows follow it in steps too small to see
   shadowClock -= dt;
-  if (shadowClock <= 0 || keys.has('KeyT')) {
-    shadowClock = inVoid ? 1 : 20;
-    if (inVoid) { lightProbe.color.copy(world.sun.color); lightProbe.intensity = world.sunStrength(); world.tomb.intensity = world.shafts.update(SUN, lightProbe) * 14; } else { world.tomb.intensity = 0; world.refresh(); }
-  }
+  if (!inVoid && (shadowClock <= 0 || keys.has('KeyT'))) { shadowClock = 0.5; world.refresh(); }
 
   world.water.material.uniforms.time.value = time;
   world.lamps.material.uniforms.t.value = time;
@@ -273,7 +279,8 @@ function tick(dt) {
   world.fire.update(dt, time, camera);
 
   lodClock += dt;
-  if (lodClock > 0.25 && lodAt.distanceTo({ x: p.x, y: p.z }) > 6) {
+  const moved = lodAt.distanceTo({ x: p.x, y: p.z });
+  if (moved > 3 && (lodClock > 0.25 || moved > 12)) {                     // at once after a jump
     world.trees.updateLOD(p.x, p.z, 45); lodAt.set(p.x, p.z); lodClock = 0;
   }
 
@@ -358,9 +365,9 @@ async function start() {
 
   $('about').innerHTML = SCALE === 1
     ? 'You stand here at true eye height against the 150 m sphere. Screens make large things look small, so it feels smaller than it would in person. <a href="./">Use the corrected camera</a>.'
-    : 'The sphere is 150 m across, as published and as the figures in his drawings bear out. Screens and games make large things look small, so the camera here stands lower and moves slower to give back the sense of size, and visitors are drawn to match. <a href="?scale=1">See it at true eye height</a>.';
+    : 'Screens make large things look small, so the camera here stands lower and moves slower to give back the sense of size. <a href="?scale=1">See it at true eye height</a>.';
   arrive(PLACES[0]);
-  world.trees.updateLOD(1e6, 1e6, 75);          // every tree in the shadow map
+  world.trees.updateLOD(player.pos.x, player.pos.z, 45); lodAt.set(player.pos.x, player.pos.z);
   world.fire.update(0.016, 0, camera);
   renderer.shadowMap.needsUpdate = true;
   renderer.compile(world.scene, camera);

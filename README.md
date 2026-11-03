@@ -24,6 +24,7 @@ On a phone, turn to look and walk for real to move: the page counts your steps. 
 | `scripts/make_web_textures.py` | Generates the page's tiling stone, ground and foliage textures |
 | `web/public/assets/constellations.json` | The painted figures on the vault, made by `web/tools/birth_sky.mjs` |
 | `web/public/assets/music/` | The page's music (see Sound) |
+| `web/public/assets/figures.webp` | The paper visitors, cut from engraved plates by `web/tools/figures/` |
 | `web/` | The walkable page. `.github/workflows/pages.yml` builds and deploys it on every push to `web/` |
 | `docs/dimensions.json` | The dimensions and tree counts the last build used |
 
@@ -111,8 +112,9 @@ If you want a concrete version, swap the `Limestone ashlar` and `Limestone dress
 - The painted constellations are my addition too: Ptolemy's 48, the figures Newton knew (the Argo still one ship), as stick figures from [d3-celestial](https://github.com/ofrohn/d3-celestial) (BSD-3-Clause). Each corner is a catalogue star moved back to 1643, so it lands on its opening; 33 of the 48 are above the horizon that night.
 - The vault's stars are my addition to the idea: `web/tools/birth_sky.mjs` places them from the HYG catalogue for 25 Dec 1642 (Julian) at Woolsthorpe, corrected for proper motion and precession. No reliable source records the hour, so 2 a.m. is an assumption. South lies over the front.
 - The inscription is my wording, echoing Newton's Westminster Abbey epitaph: ISAACO NEWTONO / QVI NATVRAE LEGES PATEFECIT / HVMANI GENERIS DECVS. The sheet shows only faint lines there.
-- The oil lamps in the passages are my addition: without them the middle of a passage is pitch dark.
-- The drawings show the lions only as small dark shapes, so their pose and modelling are my reading. The brazier, small portal and people are simplified stand-ins for scale.
+- The oil lamps in the passages, and their iron sconces, are my addition: without them the middle of a passage is pitch dark.
+- The drawings show the lions only as small dark shapes, so their pose and modelling are my reading. The brazier and small portal are simplified stand-ins.
+- The visitors are paper cut-outs of Parisians from Boullée's own years, cut from the engraved plates of the *Galerie des Modes et Costumes Français* (1778–1787) and printed in one ink. They turn to face you, like figures cut from a print and propped up. They are there for scale, not as a claim about who would have come.
 - The interior galleries shown in the section, inside the drum, are not modelled. The drum is solid.
 - Seen from a few metres away, the cypress foliage looks lumpy. It reads well from the normal viewing distances.
 - The landscape (meadow, hills, woodland, basin, allée) is invented scenery.
@@ -125,11 +127,12 @@ Nothing inside is painted on. The sun moves across the sky, and everything it do
 - **Columns inside:** an 8 m bore is a light pipe, not a pinhole. Light can only leave along its axis, so each column stays fixed and all of them meet on the sarcophagus. Only their strength changes: the sky keeps each faintly lit, and sunlight adds to it as the sun nears the bore's line, losing a share at every bounce off the wall. See `web/src/sunshafts.js`. The columns are drawn with the exact length of the view ray inside them.
 - **Sky light inside the sphere:** the form factor from every bore to every vertex, plus the exact interreflection for a closed sphere. With the vault painted black, almost all of that bounce comes off the floor and the tomb.
 - **Sky light and bounce elsewhere:** path traced in Cycles into the vertices by `scripts/export_web.py`, along with the passage lamps. The bounce is baked from a midday sun, so it doesn't move with the sun.
+- **Nothing pops in:** the columns and pinholes fade up over a second and a half as you arrive, the sun's shadows follow it every half second in steps too small to see, and each tree hands over from one detail level to the next across a band of distance in a fine dither, never in one frame.
 - **Exposure:** one fixed value everywhere, so nothing changes as you cross a threshold. The interior and passages are set to the level the eye would settle at, a fixed multiple of the computed light.
 
 ## Sound
 
-Every footstep is synthesised for what is underfoot (limestone, the gravel walks, or the meadow) and played through the echo of the space you're in: open air, a stone passage 4.4 m wide with its flutter between the walls, or the sphere, whose 13-second echo gathers back to the middle. The echoes are computed in the page from each room's size; see `web/src/sound.js`. On a phone, each real step you take makes one footfall.
+Every footstep is synthesised for what is underfoot (limestone, the gravel walks, or the meadow) and played through the echo of the space you're in: open air, a stone passage 4.4 m wide with its flutter between the walls, or the sphere, whose long echo gathers back to the middle. The echoes are computed in the page from each room's size; see `web/src/sound.js`. On a phone, each real step you take makes one footfall.
 
 The music is the opening of Haydn's *The Creation* (1798): "The Representation of Chaos" and "In the beginning", where the chorus sings "and there was light". Alexander Pope's epitaph for Newton turns the same verse: "Nature and Nature's laws lay hid in night; God said, Let Newton be! and all was light." The recording is by St Matthew's Choir, conducted by Phiroz Dalal, released into the public domain ([Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Haydn_-_The_Creation_(Dalal)_-_1_The_Representation_of_Chaos.oga), from archive.org). The two movements are joined and converted to AAC for the page.
 
@@ -141,6 +144,6 @@ The music is the opening of Haydn's *The Creation* (1798): "The Representation o
 - [The Marginalian on the cenotaph](https://www.themarginalian.org/2021/03/18/etienne-louis-boullee-newton-cenotaph/)
 - [UT Pictura18: perspective elevation record](https://utpictura18.univ-amu.fr/en/notice/10256-newton-cenotaph-project-perspective-elevation-etienne-louis-boullee)
 
-The page uses [three.js](https://threejs.org/) (MIT), [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) (MIT) and Draco (Apache-2.0). The star catalogue is [HYG v4.1](https://github.com/astronexus/HYG-Database) (CC BY-SA 4.0), and the constellation figures are from d3-celestial (BSD-3-Clause, © 2015 Olaf Frohn; licence in `web/public/assets/constellations.LICENSE.txt`).
+The page uses [three.js](https://threejs.org/) (MIT), [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) (MIT) and Draco (Apache-2.0). The visitors are cut from eleven plates of the *Galerie des Modes et Costumes Français* in the [Rijksmuseum](https://www.rijksmuseum.nl/) (CC0, via Wikimedia Commons; listed in `web/tools/figures/plates.json`). The star catalogue is [HYG v4.1](https://github.com/astronexus/HYG-Database) (CC BY-SA 4.0), and the constellation figures are from d3-celestial (BSD-3-Clause, © 2015 Olaf Frohn; licence in `web/public/assets/constellations.LICENSE.txt`).
 
 Built 2026-10-25.

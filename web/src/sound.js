@@ -44,7 +44,7 @@ export function makeSound() {
     const spaces = {
       open: { ir: { seconds: 0.6, darken: 9 }, wet: 0.12 },
       passage: { ir: { seconds: 2.6, darken: 2.2, flutter: 4.4 / 343 }, wet: 1.1 },
-      void: { ir: { seconds: 13, darken: 0.42, build: 0.25, echoes: [[0.39, 0.5], [0.78, 0.3], [1.17, 0.17]] }, wet: 3.2 },
+      void: { ir: { seconds: 8, darken: 0.6, build: 0.25, echoes: [[0.39, 0.25], [0.78, 0.12]] }, wet: 1.2 },
     };
     for (const [name, s] of Object.entries(spaces)) {
       const conv = ctx.createConvolver(), gain = ctx.createGain();

@@ -28,6 +28,7 @@ export function makeSunshafts(holeBuffer) {
   pack(beams, 'to', 3, (a, i, b) => a.setXYZ(i, b.end.x, b.end.y, b.end.z));
   pack(beams, 'radius', 1, (a, i, b) => a.setX(i, b.r * 1.5));
   const beamGlow = pack(beams, 'glow', 1, () => {});
+  const fade = { value: 0 };                         // the light comes up gently when you arrive, never all at once
   const uniforms = { tint: { value: new THREE.Color() } };
   const column = new THREE.Mesh(beams, new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.BackSide, uniforms,
@@ -59,10 +60,10 @@ export function makeSunshafts(holeBuffer) {
   seen.setAttribute('size', new THREE.BufferAttribute(size, 1));
   const scale = { value: 800 };
   const glows = new THREE.Points(seen, new THREE.ShaderMaterial({
-    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { scale },
-    vertexShader: `attribute float size; uniform float scale; varying float vBright;
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { scale, fade },
+    vertexShader: `attribute float size; uniform float scale, fade; varying float vBright;
       void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = clamp(size * 9.0 * scale / -mv.z, 7.0, 46.0);
-        vBright = 0.35 + 1.5 * size; gl_Position = projectionMatrix * mv; }`,
+        vBright = (0.35 + 1.5 * size) * fade; gl_Position = projectionMatrix * mv; }`,
     fragmentShader: `varying float vBright;
       void main(){ float d = length(gl_PointCoord - 0.5) * 2.0, core = exp(-d * d * 26.0), halo = exp(-d * d * 5.0) * (1.0 - d);
         gl_FragColor = vec4(vec3(0.82, 0.9, 1.0) * (core * 1.5 + max(halo, 0.0) * 0.3) * vBright, 1.0); }`,
@@ -74,6 +75,7 @@ export function makeSunshafts(holeBuffer) {
   return {
     mesh,
     scale,
+    fade,
     update(sun, light) {
       let total = 0;
       bores.forEach((b, i) => {
@@ -88,7 +90,7 @@ export function makeSunshafts(holeBuffer) {
         total += glow * b.r * b.r;
       });
       beamGlow.needsUpdate = true;
-      uniforms.tint.value.copy(light.color).multiplyScalar(light.intensity);
+      uniforms.tint.value.copy(light.color).multiplyScalar(light.intensity * fade.value);
       return total;                                  // what reaches the tomb, in units of bore area
     },
   };

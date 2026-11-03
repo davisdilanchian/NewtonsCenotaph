@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { SCALE } from './util.js';
 
-export const RADIUS = 0.32 / SCALE, HEIGHT = 1.75 / SCALE, WALK = 2.2 / SCALE, RUN = 9.5 / Math.sqrt(SCALE);
+export const RADIUS = 0.32 / SCALE, HEIGHT = 1.75 / SCALE, WALK = 2.2 / SCALE, RUN = 5.5 / Math.sqrt(SCALE);
 const GRAVITY = 22 / SCALE, JUMP = 6.4 / SCALE, WORLD_R = 790, SUBSTEPS = 4;
 
 const box = new THREE.Box3(), seg = new THREE.Line3(), triPt = new THREE.Vector3(), capPt = new THREE.Vector3();

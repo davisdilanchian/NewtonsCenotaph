@@ -8,7 +8,7 @@ import { Reflector } from './mirror.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
 import { noise3, rng, smooth, SCALE } from './util.js';
-import { figureGeometries } from './character.js';
+import { makeCutouts } from './figures.js';
 import { makeSunshafts } from './sunshafts.js';
 
 export const CENTER = new THREE.Vector3(0, 73.5, 0);        // sphere centre
@@ -40,6 +40,7 @@ function load(name, srgb, renderer, manager) {
 }
 
 const SKY_LEVEL = { value: 1 };                 // follows the height of the sun
+const FIGURE_LIGHT = { value: 1 };              // the paper visitors, lit like the stone around them
 
 /** Weather that repeats nowhere: broad tonal drift, rain streaks, and the sphere's stone courses. */
 function weathered(mat, { streaks = 1, courses = false, level = 1 } = {}) {
@@ -223,10 +224,34 @@ function makeTrees(buffer, foliage, scene) {
   const bark = new THREE.MeshStandardMaterial({ color: 0x3c2a1e, roughness: 0.95 });
   const trunkGeo = new THREE.CylinderGeometry(0.11, 0.2, 1.7, 6, 1, true).translate(0, 0.75, 0);
   const trunks = new THREE.InstancedMesh(trunkGeo, bark, nTrees);
+  // Each detail level hands over to the next across a band of distance, its pixels thinning out in a
+  // fine dither as the next one's fill in, measured from the eye every frame, so no tree ever swaps.
+  const bands = { value: new THREE.Vector4() }, BLEND = [3, 10];
+  const levels = [0, 1, 2].map((lod) => {
+    const m = foliage.clone();
+    m.defines = { LOD: lod };
+    m.onBeforeCompile = (s) => {
+      s.uniforms.bands = bands;
+      s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vTreeAt;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTreeAt = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xz;');
+      s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec4 bands; varying vec2 vTreeAt;')
+        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+          float d = distance(vTreeAt, cameraPosition.xz), n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+          float a = 1.0 - smoothstep(bands.x, bands.y, d), b = 1.0 - smoothstep(bands.z, bands.w, d);
+          #if LOD == 0
+            if (n >= a) discard;
+          #elif LOD == 1
+            if (n < a || n >= b) discard;
+          #else
+            if (n < b) discard;
+          #endif`);
+    };
+    return m;
+  });
   const sets = [];
   for (let v = 0; v < VARIANTS; v++) {
-    sets.push([[120, 5, 4], [46, 4, 3], [18, 3, 2]].map(([sprays, sides, rings]) => {
-      const mesh = new THREE.InstancedMesh(cypressTree(sprays, sides, rings, v * 9.1, heights[v]), foliage, nTrees);
+    sets.push([[120, 5, 4], [46, 4, 3], [18, 3, 2]].map(([sprays, sides, rings], lod) => {
+      const mesh = new THREE.InstancedMesh(cypressTree(sprays, sides, rings, v * 9.1, heights[v]), levels[lod], nTrees);
       mesh.frustumCulled = false; mesh.receiveShadow = mesh.castShadow = true; mesh.count = 0;
       scene.add(mesh);
       return mesh;
@@ -244,12 +269,17 @@ function makeTrees(buffer, foliage, scene) {
   trunks.castShadow = true; trunks.frustumCulled = false;
   scene.add(trunks);
 
-  // three detail levels of the same tree, by distance from the walker
-  function updateLOD(x, z, nearDist) {
-    const n2 = nearDist * nearDist, m2 = 9 * n2, counts = sets.map(() => [0, 0, 0]);
+  // three detail levels of the same tree, by distance from the walker. A tree near a band belongs to
+  // both levels, with room to spare for the walker moving on before the next update.
+  function updateLOD(x, z, nearDist, spare = 5) {
+    const near = nearDist, far = 3 * nearDist, counts = sets.map(() => [0, 0, 0]);
+    bands.value.set(near - BLEND[0], near + BLEND[0], far - BLEND[1], far + BLEND[1]);
+    const put = (t, lod) => { const k = counts[t.v][lod]++, mesh = sets[t.v][lod]; mesh.setMatrixAt(k, t.matrix); mesh.setColorAt(k, t.color); };
     for (const t of trees) {
-      const d = (t.x - x) ** 2 + (t.z - z) ** 2, lod = d < n2 ? 0 : d < m2 ? 1 : 2, k = counts[t.v][lod]++, mesh = sets[t.v][lod];
-      mesh.setMatrixAt(k, t.matrix); mesh.setColorAt(k, t.color);
+      const d = Math.hypot(t.x - x, t.z - z);
+      if (d < near + BLEND[0] + spare) put(t, 0);
+      if (d > near - BLEND[0] - spare && d < far + BLEND[1] + spare) put(t, 1);
+      if (d > far - BLEND[1] - spare) put(t, 2);
     }
     sets.forEach((lods, v) => lods.forEach((mesh, l) => {
       mesh.count = counts[v][l];
@@ -427,6 +457,56 @@ function makeFigures(list) {
 }
 
 /** The brazier: a turbulent flame, sparks and smoke, and a real light thrown on the stone round it. */
+/**
+ * A wrought-iron sconce under each flame: a cup to hold it, an arm and a brace back to the nearest
+ * wall, and a plate fixed to the stone. The flame's own light is painted onto the iron.
+ */
+function makeSconces(buffer, bvh) {
+  const n = new Uint32Array(buffer, 0, 1)[0], pos = new Float32Array(buffer, 4, n * 3), parts = [];
+  const ray = new THREE.Ray(), m = new THREE.Matrix4(), q = new THREE.Quaternion(), flame = new THREE.Vector3(), out = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+  const rod = (a, b, r) => {                         // a round bar from a to b, in the sconce's frame
+    const d = b.clone().sub(a), g = new THREE.CylinderGeometry(r, r, d.length(), 6, 1, true);
+    return g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(up, d.normalize())).translate((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+  };
+  const V = (x, y, z) => new THREE.Vector3(x, y, z);
+  for (let i = 0; i < n; i++) {
+    flame.fromArray(pos, i * 3);
+    let best = null;                                 // the nearest wall, looking all round at flame height
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2;
+      ray.set(flame, V(Math.cos(a), 0, Math.sin(a)));
+      const hit = bvh.raycastFirst(ray, THREE.DoubleSide);
+      if (hit && hit.distance < 1.5 && (!best || hit.distance < best.distance)) best = { distance: hit.distance, dir: ray.direction.clone() };
+    }
+    if (!best) continue;
+    const D = best.distance;                         // local frame: flame at the origin, wall at z = -D
+    const cup = new THREE.LatheGeometry([[0.0, -0.27], [0.035, -0.27], [0.07, -0.23], [0.095, -0.17], [0.105, -0.16]].map(([r, h]) => new THREE.Vector2(r, h)), 10);
+    const ring = new THREE.TorusGeometry(0.105, 0.01, 4, 12).rotateX(Math.PI / 2).translate(0, -0.16, 0);
+    const knob = new THREE.SphereGeometry(0.025, 6, 4).translate(0, -0.29, 0);
+    const arm = rod(V(0, -0.27, 0), V(0, -0.27, -D), 0.014);
+    const brace = rod(V(0, -0.27, -0.05), V(0, -0.55, -D), 0.011);
+    const plate = new THREE.BoxGeometry(0.13, 0.42, 0.025).translate(0, -0.4, -D + 0.012);
+    q.setFromUnitVectors(V(0, 0, -1), best.dir);
+    m.compose(flame, q, V(1, 1, 1));
+    for (const g of [cup, ring, knob, arm, brace, plate]) {
+      const flat = g.index ? g.toNonIndexed() : g;
+      flat.deleteAttribute('uv');
+      flat.computeVertexNormals();
+      // lit from the flame above: iron, with a warm edge where it faces the light
+      const p = flat.attributes.position, nrm = flat.attributes.normal, c = new Float32Array(p.count * 3);
+      for (let j = 0; j < p.count; j++) {
+        out.set(-p.getX(j), 0.05 - p.getY(j), -p.getZ(j));
+        const d2 = out.lengthSq(), face = Math.max(0, (nrm.getX(j) * out.x + nrm.getY(j) * out.y + nrm.getZ(j) * out.z) / Math.sqrt(d2));
+        const k = 0.05 + (1.4 * face) / (1 + 14 * d2);
+        c.set([0.11 * k + 0.012, 0.075 * k + 0.009, 0.045 * k + 0.007], j * 3);
+      }
+      flat.setAttribute('color', new THREE.BufferAttribute(c, 3));
+      parts.push(flat.applyMatrix4(m));
+    }
+  }
+  return new THREE.Mesh(mergeGeometries(parts), new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+}
+
 function makeFire() {
   const group = new THREE.Group();
   group.position.set(0, 66.75, 78);
@@ -509,21 +589,16 @@ function makeFire() {
   };
 }
 
-function makeVisitors(scene) {
+function makeVisitors(scene, sheet, places) {
   const r = rng(5), spots = [[-8, 5.5, 132, 5], [9, 5.5, 136, 3], [-6, 5.5, 112, 4], [11, 5.5, 116, 3], [-14, 46.5, 96, 4], [10, 46.5, 98, 3],
                              [-17, 0, 178, 4], [15, 0, 188, 3], [-26, 0, 310, 2], [26, 0, 430, 3], [-24, 5.5, 150, 2], [-14, 14, -6, 4], [15, 14, 9, 4], [-9, 14, 15, 3], [16, 14, -13, 3], [4.5, 17, 3.5, 2],
                              [-30, 5.5, 140, 5], [34, 5.5, 128, 4], [0, 0, 198, 6], [6, 64, 73, 3], [-22, 46.5, 92, 3], [24, 0, 640, 3], [-27, 0, 560, 2]];
-  const black = new THREE.MeshBasicMaterial({ color: 0x000000, fog: false }), list = [];
-  for (const g of figureGeometries()) {
-    const mesh = new THREE.InstancedMesh(g, black, 40);
-    mesh.frustumCulled = false; mesh.count = 0; mesh.castShadow = true; list.push(mesh); scene.add(mesh);
-  }
-  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
+  const people = [];
   for (const [x, y, z, n] of spots) for (let i = 0; i < n; i++) {
-    p.set(x + (r() - 0.5) * 4, y, z + (r() - 0.5) * 4); q.setFromAxisAngle(up, r() * 6.28); s.setScalar((0.9 + r() * 0.1) / SCALE);
-    const mesh = list[Math.floor(r() * list.length)];
-    mesh.setMatrixAt(mesh.count++, m.compose(p, q, s));
+    const px = x + (r() - 0.5) * 4, pz = z + (r() - 0.5) * 4;
+    people.push([px, y, pz, Math.hypot(px, y - CENTER.y, pz) < 67]);
   }
+  scene.add(...makeCutouts(sheet, places, people, { scale: SCALE, rand: r, light: FIGURE_LIGHT }));
 }
 
 // ----------------------------------------------------------------------- load
@@ -560,8 +635,10 @@ export async function loadWorld(renderer, onProgress) {
   const draco = new DRACOLoader(manager).setDecoderPath('./draco/');
   const gltfLoader = new GLTFLoader(manager).setDRACOLoader(draco);
   const fileLoader = new THREE.FileLoader(manager).setResponseType('arraybuffer');
-  const [gltf, treeBuf, holeBuf, lampBuf, figureList] = await Promise.all([gltfLoader.loadAsync('assets/monument.glb'), fileLoader.loadAsync('assets/trees.bin'),
-    fileLoader.loadAsync('assets/holes.bin'), fileLoader.loadAsync('assets/lamps.bin'), new THREE.FileLoader(manager).setResponseType('json').loadAsync('assets/constellations.json')]);
+  const json = new THREE.FileLoader(manager).setResponseType('json');
+  const [gltf, treeBuf, holeBuf, lampBuf, figureList, figureSheet, figurePlaces] = await Promise.all([gltfLoader.loadAsync('assets/monument.glb'), fileLoader.loadAsync('assets/trees.bin'),
+    fileLoader.loadAsync('assets/holes.bin'), fileLoader.loadAsync('assets/lamps.bin'), json.loadAsync('assets/constellations.json'),
+    new THREE.TextureLoader(manager).loadAsync('assets/figures.webp'), json.loadAsync('assets/figures.json')]);
   draco.dispose();
 
   const root = gltf.scene, solids = [];
@@ -617,9 +694,9 @@ export async function loadWorld(renderer, onProgress) {
   sky.material.depthTest = false; sky.renderOrder = -1;   // it sits at the far plane, which the reversed depth buffer would put in front
   const fire = makeFire();
   scene.add(fire.group);
-  makeVisitors(scene);
+  makeVisitors(scene, figureSheet, figurePlaces);
   const lamps = makeLamps(lampBuf);
-  scene.add(lamps);
+  scene.add(lamps, makeSconces(lampBuf, bvh));
 
 
   // The sun is the only light here. Outdoors its shadow map covers the whole site; underground and
@@ -651,6 +728,7 @@ export async function loadWorld(renderer, onProgress) {
     sunStrength = 2.6 + 1.1 * lift;
     sun.intensity = close ? 0 : sunStrength;     // inside, sunlight arrives only down the bores
     SKY_LEVEL.value = 0.5 + 0.5 * lift;
+    FIGURE_LIGHT.value = 0.55 + 0.25 * lift;
     sun.position.copy(sun.target.position).addScaledVector(SUN, 1100);
   };
   // in the void only the shell and what stands inside it can matter, so nothing else is drawn or shadowed
