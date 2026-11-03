@@ -53,7 +53,7 @@ for s_ in (-1, 1):
                           [[(s_ * 30, -76.0, 49), (s_ * 10.3, -84.6, 49), (s_ * 10.3, -84.6, 67), (s_ * 30, -76.0, 67)]]))
 
 # the dais in the sphere: a slope over its step nosings on each face, open at the doorway in the
-# front, and the walls of the room under the tomb and its corridor out, since the steps themselves
+# back, and the walls of the room under the tomb and its corridor out, since the steps themselves
 # are not walked on
 z0, z1, n_ = D["floor_top"], D["mound_top"], D["dais_steps"]
 b_, t_ = D["dais_base_half"], D["dais_top_half"]
@@ -63,28 +63,29 @@ dw, dh = 1.2, 2.9
 hd = foot - dh * tread / rise_                            # where the slope clears the top of the doorway
 zd = z0 + dh
 spin = lambda q, a: [(x * math.cos(a) - y * math.sin(a), x * math.sin(a) + y * math.cos(a), z) for x, y, z in q]
-quads = [[(-head, -head, z1), (head, -head, z1), (head, head, z1), (-head, head, z1)],
-         [(-foot, -foot, z0), (-dw, -foot, z0), (-dw, -hd, zd), (-hd, -hd, zd)],                 # the front face, round its doorway
-         [(dw, -foot, z0), (foot, -foot, z0), (hd, -hd, zd), (dw, -hd, zd)],
-         [(-hd, -hd, zd), (hd, -hd, zd), (head, -head, z1), (-head, -head, z1)]]
-for a in (1, 2, 3):
+back = [[(-foot, -foot, z0), (-dw, -foot, z0), (-dw, -hd, zd), (-hd, -hd, zd)],     # a face round its doorway, as the front, turned to the back
+        [(dw, -foot, z0), (foot, -foot, z0), (hd, -hd, zd), (dw, -hd, zd)],
+        [(-hd, -hd, zd), (hd, -hd, zd), (head, -head, z1), (-head, -head, z1)]]
+quads = [[(-head, -head, z1), (head, -head, z1), (head, head, z1), (-head, head, z1)]] + [spin(q, math.pi) for q in back]
+for a in (0, 1, 3):
     quads.append(spin([(-foot, -foot, z0), (foot, -foot, z0), (head, -head, z1), (-head, -head, z1)], a * math.pi / 2))
 C, ct = B.CHAMBER, z0 + B.CHAMBER_H
 w_ = D["passage_half_w"]
-walls = [[(s_ * dw, -foot, z0), (s_ * dw, -C, z0), (s_ * dw, -C, zd), (s_ * dw, -foot, zd)] for s_ in (-1, 1)]   # the corridor
-for x0_, y0_, x1_, y1_ in ((-C, -C, -dw, -C), (dw, -C, C, -C), (-C, C, C, C),                                  # front, round the corridor, and back
-                           (-C, -C, -C, -w_), (-C, w_, -C, C), (C, -C, C, -w_), (C, w_, C, C)):              # the sides, round the stairs
+walls = [[(s_ * dw, foot, z0), (s_ * dw, C, z0), (s_ * dw, C, zd), (s_ * dw, foot, zd)] for s_ in (-1, 1)]     # the corridor out
+for x0_, y0_, x1_, y1_ in ((-C, -C, -w_, -C), (w_, -C, C, -C), (-C, C, -dw, C), (dw, C, C, C),             # front and back, round their openings
+                           (-C, -C, -C, -w_), (-C, w_, -C, C), (C, -C, C, -w_), (C, w_, C, C)):             # the sides, round the stairs
     walls.append([(x0_, y0_, z0), (x1_, y1_, z0), (x1_, y1_, ct), (x0_, y0_, ct)])
 cols.append(ramp_mesh("COL_dais", quads))
 cols.append(ramp_mesh("COL_crypt_walls", walls))
 
-# the two flights up under the dais: a slope along their nosings, from the level passage to the room
+# the three flights up under the dais: a slope along their nosings, from the level passage to the room
 pz, ft = D["passage_z"], D["floor_top"]
 n_s = int(round((ft - pz) / 0.2)); run_ = (B.RISE_FOOT - B.RISE_HEAD) / n_s
 fl = []
-for s_ in (-1, 1):
-    a_, b2, c_ = s_ * (B.RISE_FOOT + run_), s_ * (B.RISE_HEAD + run_), s_ * (B.CHAMBER - 0.6)
-    fl += [[(a_, -w_, pz), (a_, w_, pz), (b2, w_, ft), (b2, -w_, ft)], [(b2, -w_, ft), (b2, w_, ft), (c_, w_, ft), (c_, -w_, ft)]]
+for a in (0, 1, 2):                                       # east, front and west: the flight along +x, turned
+    a_, b2, c_ = B.RISE_FOOT + run_, B.RISE_HEAD + run_, B.CHAMBER - 0.6
+    for q in ([(a_, -w_, pz), (a_, w_, pz), (b2, w_, ft), (b2, -w_, ft)], [(b2, -w_, ft), (b2, w_, ft), (c_, w_, ft), (c_, -w_, ft)]):
+        fl.append(spin(q, -a * math.pi / 2))
 cols.append(ramp_mesh("COL_crypt_stairs", fl))
 
 # what the page draws

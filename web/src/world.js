@@ -29,6 +29,8 @@ export function groundHeight(x, z) {
 
 const NOT_SOLID = new Set(['Main stair', 'Front stair block', 'Planting beds', 'Lions', 'Funeral brazier', 'Inscription',
                            'Esplanade and walks', 'Drum dentils', 'Bridge portal door', 'Sarcophagus dais', 'Passage stairs']);
+// of those, the ones walked over on a slope, whose real treads the visitors stand on
+const STEPPED = new Set(['Main stair', 'Front stair block', 'Esplanade and walks', 'Sarcophagus dais', 'Passage stairs']);
 
 // ------------------------------------------------------------------ texturing
 function load(name, srgb, renderer, manager) {
@@ -111,19 +113,31 @@ function stoneUVs(source, tile, sphere) {
 }
 
 /**
- * The passage a face lies in, if any, as the line its courses run along: the front passage, the
- * curved one that carries it round, or the east-west one that climbs under the dais. Walls and
- * vaults then take courses that run along that line and climb straight over the vault, so no joint
- * breaks between faces.
+ * The passage a face lies in, if any, as the line its courses run along: the front passage or the
+ * east-west one, each climbing under the dais at its end. Walls and vaults then take courses that
+ * run along that line and climb straight over the vault, so no joint breaks between faces.
  */
-const RING_R = 26;
 function passageAxis(x, y, z, n) {
   if (y > 13.9) return null;                                                        // the room under the tomb, and the sphere's floor and all above it
-  const ax = Math.abs(x), r = Math.hypot(x, z);
-  if (z > -3 && Math.abs(r - RING_R) < 3 && !(ax < 3 && z > RING_R)) return { ring: true };
-  if (ax < 7.3 && z > 23 && z < 112 && (z < 95 || Math.abs(n.z) < 0.7)) return { along: 'z', at: 0 };
+  const ax = Math.abs(x);
+  if (ax < 7.3 && z > 2 && z < 112 && (z < 95 || Math.abs(n.z) < 0.7)) return { along: 'z', at: 0 };
   if (Math.abs(z) < 3.6 && ax < 125 && (ax < 115 || Math.abs(n.x) < 0.7)) return { along: 'x', at: 0 };
   return null;
+}
+
+/** The faces of the dais that lie well inside it, below its steps: the walls and roofs of the stairs and the room. */
+function insideDais(mesh) {
+  const g = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld), src = (g.index ? g.toNonIndexed() : g).attributes.position, keep = [];
+  const b = 15, tread = 0.375, rise = 0.23;                                   // the dais in build_scene.py: half widths 15 to 7.5, 20 steps of 0.23
+  for (let i = 0; i < src.count; i += 3) {
+    let x = 0, y = 0, z = 0;
+    for (let k = 0; k < 3; k++) { x += src.getX(i + k) / 3; y += src.getY(i + k) / 3; z += src.getZ(i + k) / 3; }
+    const h = Math.max(Math.abs(x), Math.abs(z)), under = 14 + Math.max(0, b - h) / tread * rise;
+    if (h < b - 0.3 && y < under - 0.35) for (let k = 0; k < 3; k++) keep.push(src.getX(i + k), src.getY(i + k), src.getZ(i + k));
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(keep, 3));
+  return out;
 }
 
 /** Split a mesh's passage faces out of it: floors go to paving, walls and vaults to coursed ashlar. */
@@ -139,8 +153,7 @@ function splitPassages(g, tile) {
     if (n.y > 0.65) { out.floor.push(i); continue; }
     out.wall.push(i);
     for (const v of [a, b, c]) {
-      const along = axis.ring ? Math.atan2(v.x, v.z) * RING_R : axis.along === 'z' ? v.z : v.x;
-      const across = axis.ring ? Math.hypot(v.x, v.z) - RING_R : (axis.along === 'z' ? v.x : v.z) - axis.at;
+      const along = axis.along === 'z' ? v.z : v.x, across = (axis.along === 'z' ? v.x : v.z) - axis.at;
       wallUV.push(along / tile, (v.y + Math.abs(across)) / tile);      // up the wall, then on over the vault
     }
   }
@@ -649,8 +662,8 @@ function makeFire() {
 
 // How much light a visitor stands in: full daylight outside, little in the passages, less in the void.
 function lightAt(x, y, z) {
-  if (y < 13.9 && (Math.abs(x) < 7.3 && z > 23 && z < 100 || Math.abs(z) < 3.6 && Math.abs(x) < 112 || z > -3 && Math.abs(Math.hypot(x, z) - RING_R) < 3)) return 0.3;
-  if (y < 17.5 && Math.abs(x) < 3.6 && z > -3.6 && z < 16) return 0.3;                // the room under the tomb and its way out
+  if (y < 13.9 && (Math.abs(x) < 7.3 && z > 2 && z < 100 || Math.abs(z) < 3.6 && Math.abs(x) < 112)) return 0.3;
+  if (y < 17.5 && Math.abs(x) < 3.6 && z > -16 && z < 3.6) return 0.3;                // the room under the tomb and its way out
   return Math.hypot(x, y - CENTER.y, z) < 67 ? 0.16 : 1;
 }
 
@@ -659,34 +672,39 @@ function lightAt(x, y, z) {
 function floorBelow(bvh, x, y, z, ray = new THREE.Ray()) {
   ray.origin.set(x, y, z); ray.direction.set(0, -1, 0);
   const hit = bvh.raycastFirst(ray, THREE.DoubleSide);
-  return hit ? hit.point.y : y - 1;
+  return hit ? hit.point.y : -Infinity;
 }
 
-// Tourists' way in: up from the esplanade, through the arch and along the passage, round the curved
-// passage to the east one, up the stair under the dais to the room beneath the tomb, and out of its
-// doorway into the sphere.
-const ROUTE = [[0, 206], [0, 160], [0, 126], [0, 112], [0, 96],
-  ...Array.from({ length: 10 }, (_, k) => [RING_R * Math.sin((Math.PI / 2) * k / 9), RING_R * Math.cos((Math.PI / 2) * k / 9)]),
-  [18.5, 0], [3.2, 0], [0, 1.5], [0, 17], [7, 23], [15, 21]];
+// What a visitor stands on: the first solid below, or the ground, which the collider leaves out; but
+// where that is an invisible slope laid over steps, the real tread beneath it.
+function standOn({ bvh, slopes, treads }, x, y, z, ray) {
+  const solid = Math.max(floorBelow(bvh, x, y, z, ray), groundHeight(x, z)), tread = floorBelow(treads, x, y, z, ray);
+  if (Math.abs(floorBelow(slopes, x, y, z, ray) - solid) < 1e-3) return tread > solid - 0.8 ? tread : solid;
+  return Math.max(solid, tread);
+}
 
-function makeVisitors(scene, sheet, places, bvh) {
+// Tourists' way in: up from the esplanade, through the arch and straight along the passage, up the
+// stair under the dais to the room beneath the tomb, and out of its doorway into the sphere.
+const ROUTE = [[0, 206], [0, 160], [0, 126], [0, 112], [0, 96], [0, 19], [0, 3.2], [0, -1.5], [0, -17], [-7, -23], [-15, -21]];
+
+function makeVisitors(scene, sheet, places, floors) {
   const r = rng(5), ray = new THREE.Ray(), spots = [[-8, 5.5, 132, 5], [9, 5.5, 136, 3], [-6, 5.5, 112, 4], [11, 5.5, 116, 3], [-14, 46.5, 96, 4], [10, 46.5, 98, 3],
                              [-17, 0, 178, 4], [15, 0, 188, 3], [-26, 0, 310, 2], [26, 0, 430, 3], [-24, 5.5, 150, 2], [-14, 14, -20, 4], [19, 14, 9, 4], [-9, 14, 21, 3], [21, 14, -13, 3], [4.5, 18.6, 3.5, 2],
                              [-30, 5.5, 140, 5], [34, 5.5, 128, 4], [0, 0, 198, 6], [6, 64, 73, 3], [-22, 46.5, 92, 3], [24, 0, 640, 3], [-27, 0, 560, 2]];
   const people = [];
   for (const [x, y, z, n] of spots) for (let i = 0; i < n; i++) {
-    const px = x + (r() - 0.5) * 4, pz = z + (r() - 0.5) * 4, py = floorBelow(bvh, px, y + 3, pz, ray);   // standing on whatever is there
+    const px = x + (r() - 0.5) * 4, pz = z + (r() - 0.5) * 4, py = standOn(floors, px, y + 3, pz, ray);   // standing on whatever is there
     people.push([px, py, pz, lightAt(px, py, pz)]);
   }
 
-  // the route sampled every half metre, each sample on the floor beneath it
-  const path = [];
+  // the route sampled finely enough to keep feet on each step, each sample on the floor beneath it
+  const GAP = 0.1, path = [];
   let y = 1;
   for (let k = 1; k < ROUTE.length; k++) {
-    const [x0, z0] = ROUTE[k - 1], [x1, z1] = ROUTE[k], n = Math.ceil(Math.hypot(x1 - x0, z1 - z0) / 0.5);
+    const [x0, z0] = ROUTE[k - 1], [x1, z1] = ROUTE[k], n = Math.ceil(Math.hypot(x1 - x0, z1 - z0) / GAP);
     for (let j = k === 1 ? 0 : 1; j <= n; j++) {
       const x = x0 + (x1 - x0) * j / n, z = z0 + (z1 - z0) * j / n;
-      y = floorBelow(bvh, x, y + 1.2, z, ray);
+      y = standOn(floors, x, y + 1.2, z, ray);
       path.push([x, y, z]);
     }
   }
@@ -701,12 +719,12 @@ function makeVisitors(scene, sheet, places, bvh) {
     // each walks the route in, turns, and walks it out again, keeping to the right
     update(dt) {
       for (const [i, w] of walkers.entries()) {
-        w.s = (w.s + dt * w.speed * 2) % (path.length * 2);
+        w.s = (w.s + dt * w.speed / GAP) % (path.length * 2);
         const back = w.s >= path.length, at = back ? path.length * 2 - 1 - w.s : w.s;
         const k = Math.max(0, Math.min(path.length - 2, Math.floor(at))), f = at - k, p0 = path[k], p1 = path[k + 1];
         const dx = p1[0] - p0[0], dz = p1[2] - p0[2], l = Math.hypot(dx, dz) || 1, keep = (back ? -1 : 1) * (0.35 + w.side) / SCALE;
         const x = p0[0] + dx * f - (dz / l) * keep, z = p0[2] + dz * f + (dx / l) * keep;
-        const yy = p0[1] + (p1[1] - p0[1]) * f + Math.abs(Math.sin(w.s * 6.2 + w.phase)) * 0.025 / SCALE;   // a step's lift
+        const yy = p0[1] + (p1[1] - p0[1]) * f + Math.abs(Math.sin(w.s * GAP * 12.4 + w.phase)) * 0.025 / SCALE;   // a step's lift
         cut.move(first + i, x, yy, z, lightAt(x, yy, z));
       }
       cut.moved();
@@ -757,15 +775,19 @@ export async function loadWorld(renderer, onProgress) {
   const root = gltf.scene, solids = [];
   root.updateMatrixWorld(true);
   const nameOf = (o) => { let n = o; while (n.parent && n.parent !== root) n = n.parent; return n.userData.name ?? n.name; };
-  const meshes = [], inside = [];
+  const meshes = [], inside = [], slopes = [], treads = [];
   root.traverse((o) => { if (o.isMesh) meshes.push(o); });
+  const flat = (mesh) => {
+    const g = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
+    for (const k of Object.keys(g.attributes)) if (k !== 'position') g.deleteAttribute(k);
+    return g.index ? g.toNonIndexed() : g;
+  };
   for (const mesh of meshes) {
     const name = nameOf(mesh), isHelper = name.startsWith('COL_');
-    if (!NOT_SOLID.has(name)) {
-      const g = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
-      for (const k of Object.keys(g.attributes)) if (k !== 'position') g.deleteAttribute(k);
-      solids.push(g.index ? g.toNonIndexed() : g);
-    }
+    if (!NOT_SOLID.has(name)) solids.push(flat(mesh));
+    else if (name === 'Sarcophagus dais') solids.push(insideDais(mesh));   // its steps are walked over, but its rooms are walled
+    if (isHelper) slopes.push(flat(mesh));
+    if (STEPPED.has(name)) treads.push(flat(mesh));
     if (isHelper) { mesh.visible = false; continue; }
     const key = mesh.material.name;
     if (MATS[key]) {
@@ -775,9 +797,8 @@ export async function loadWorld(renderer, onProgress) {
         const c = g.attributes.color, pos = g.attributes.position, baked = new Float32Array(c.count * 3);
         for (let v = 0; v < c.count; v++) {
           const x = pos.getX(v), y = pos.getY(v), z = pos.getZ(v);
-          const inFront = Math.abs(x) < 7.3 && z > 23 && z < 110, inSide = Math.abs(z) < 3.5 && Math.abs(x) < 125;
-          const inRing = z > -3 && Math.abs(Math.hypot(x, z) - RING_R) < 3;
-          const depth = y < 14.1 ? (inFront ? 108 - z : inSide ? 121 - Math.abs(x) : inRing ? 30 : 0) : 0, k = 1 + (PASSAGES - 1) * smooth(0, 14, depth);
+          const inFront = Math.abs(x) < 7.3 && z > 2 && z < 110, inSide = Math.abs(z) < 3.5 && Math.abs(x) < 125;
+          const depth = y < 14.1 ? (inFront ? 108 - z : inSide ? 121 - Math.abs(x) : 0) : 0, k = 1 + (PASSAGES - 1) * smooth(0, 14, depth);
           const least = name === 'Basin coping' ? 0.55 : 0;   // its sides meet the ground, where the bake's vertices went dark
           baked[v * 3] = Math.max(c.getX(v) * k, least); baked[v * 3 + 1] = Math.max(c.getY(v) * k, least); baked[v * 3 + 2] = Math.max(c.getZ(v) * k, least);
         }
@@ -825,7 +846,7 @@ export async function loadWorld(renderer, onProgress) {
   sky.material.depthTest = false; sky.renderOrder = -1;   // it sits at the far plane, which the reversed depth buffer would put in front
   const fire = makeFire();
   scene.add(fire.group);
-  const visitors = makeVisitors(scene, figureSheet, figurePlaces, bvh);
+  const visitors = makeVisitors(scene, figureSheet, figurePlaces, { bvh, slopes: new MeshBVH(mergeGeometries(slopes)), treads: new MeshBVH(mergeGeometries(treads)) });
   const lamps = makeLamps(lampBuf);
   scene.add(lamps, makeSconces(lampBuf, bvh));
 
