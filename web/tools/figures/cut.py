@@ -56,11 +56,13 @@ for key, (x0, y0, x1, y1) in BOX.items():
     bg = max(corners, key=lambda c: float(c[0]))[1]
     m = f'{d}/m{n:02d}.pgm'
     run(k, '(', '+clone', '-fill', bg, '-colorize', '100', ')', '-compose', 'difference', '-composite',
-        '-colorspace', 'gray', '-threshold', f'{T}%', '-morphology', 'close', 'disk:2',
+        '-colorspace', 'gray', '-threshold', f'{T}%', '-depth', '8', m)
+    clean(m, GROUND.get(key))                        # the ruled lines go while they are still thin
+    run(m, '-morphology', 'close', 'disk:7',         # seal gaps in the engraved outline so faces and pale silk count as enclosed
         '-bordercolor', 'black', '-border', '2', '-fill', 'gray50', '-draw', 'color 0,0 floodfill',
         '-fill', 'white', '+opaque', 'gray50', '-fill', 'black', '-opaque', 'gray50', '-shave', '2', '-depth', '8', m)
     clean(m, GROUND.get(key))
-    run(m, '-define', 'connected-components:area-threshold=4000', '-define', 'connected-components:mean-color=true',
+    run(m, '-define', 'connected-components:area-threshold=20000', '-define', 'connected-components:mean-color=true',
         '-connected-components', '8', '-threshold', '50%', f'{d}/m{n:02d}.png')
     run(k, '(', f'{d}/m{n:02d}.png', '-morphology', 'erode', 'disk:1', '-blur', '0x0.8', ')',
         '-alpha', 'off', '-compose', 'copy-opacity', '-composite', f'{d}/c{n:02d}.png')

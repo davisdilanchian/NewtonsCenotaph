@@ -6,7 +6,7 @@ A to-scale 3D model of Étienne-Louis Boullée's *Cénotaphe de Newton* (1784), 
 
 The monument is its published 150 m, and the figures in the drawings measure about 130–180 m. Screens and games make large things look small, because a screen fills only a fraction of your view, so the page corrects for that with its camera: the walker, the visitors, the stone courses and the ground grain are drawn at a third of true size, which lowers the eye and slows the walk. Add `?scale=1` to the address for true eye height.
 
-On a phone, turn to look and walk for real to move: the page counts your steps. Elsewhere: WASD to walk, Shift to run, Space to jump, mouse to look, Esc to free the cursor, 1–8 to jump between places, R to reset, hold T to run the sun, [ and ] to change the field of view, M to turn the music on or off. Without motion sensors, the on-screen stick and drag still work.
+On a phone, turn to look and walk for real to move: the page feels each step and keeps you walking at your own pace for as long as the steps come. It goes full screen where the browser allows; on an iPhone, add it to the home screen for that. Elsewhere: WASD to walk, Shift to run, Space to jump, mouse to look, Esc to free the cursor, 1–8 to jump between places, R to reset, hold T to run the sun, [ and ] to change the field of view, M to turn the music on or off. Without motion sensors, the on-screen stick and drag still work.
 
 ## Folder
 
@@ -111,7 +111,7 @@ If you want a concrete version, swap the `Limestone ashlar` and `Limestone dress
 - The section (sheet 04) shows a long, low passage at terrace level, rising to the sarcophagus. I read it as cross-section through the east and west, with the elevation's arch as the front way in.
 - The painted constellations are my addition too: Ptolemy's 48, the figures Newton knew (the Argo still one ship), as stick figures from [d3-celestial](https://github.com/ofrohn/d3-celestial) (BSD-3-Clause). Each corner is a catalogue star moved back to 1643, so it lands on its opening; 33 of the 48 are above the horizon that night.
 - The vault's stars are my addition to the idea: `web/tools/birth_sky.mjs` places them from the HYG catalogue for 25 Dec 1642 (Julian) at Woolsthorpe, corrected for proper motion and precession. No reliable source records the hour, so 2 a.m. is an assumption. South lies over the front.
-- The inscription is my wording, echoing Newton's Westminster Abbey epitaph: ISAACO NEWTONO / QVI NATVRAE LEGES PATEFECIT / HVMANI GENERIS DECVS. The sheet shows only faint lines there.
+- The inscription is my wording, after Newton's tomb in Westminster Abbey, which names him ISAACVS NEWTON and calls him HVMANI GENERIS DECVS: ISAACVS NEWTON / QVI NATVRAE LEGES PATEFECIT / HVMANI GENERIS DECVS. The sheet shows only faint lines there.
 - The oil lamps in the passages, and their iron sconces, are my addition: without them the middle of a passage is pitch dark.
 - The drawings show the lions only as small dark shapes, so their pose and modelling are my reading. The brazier and small portal are simplified stand-ins.
 - The visitors are paper cut-outs of Parisians from Boullée's own years, cut from the engraved plates of the *Galerie des Modes et Costumes Français* (1778–1787) and printed in one ink. They turn to face you, like figures cut from a print and propped up. They are there for scale, not as a claim about who would have come.

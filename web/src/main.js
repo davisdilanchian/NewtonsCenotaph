@@ -95,8 +95,21 @@ let time = 0, stride = 0, bob = 0, lodAt = new THREE.Vector2(1e9, 1e9), lodClock
 const gyro = { on: false, align: false, alpha: 0, beta: 0, gamma: 0, offset: 0 };
 const DEG = Math.PI / 180, tilt = new THREE.Euler(), held = new THREE.Quaternion(), roll = new THREE.Quaternion(), turn = new THREE.Quaternion(), facing = new THREE.Vector3();
 const flat = new THREE.Quaternion(-Math.SQRT1_2, 0, 0, Math.SQRT1_2), UP = new THREE.Vector3(0, 1, 0), OUT = new THREE.Vector3(0, 0, 1);
-const STRIDE = 1.1, STEP_TIME = 0.55;                // model units a step carries you, about 3 m, and how long it takes
-let stepping = 0;
+// Each real step sets the pace from the time since the last one, and you keep walking at that pace
+// for as long as the steps keep coming. When they stop, you slow to a halt over half a second.
+const STRIDE = 1.1;                                  // model units a step carries you, about 3 m
+const steps = { last: -1e9, gap: 0.7, speed: 0 };
+function stepTaken(now) {
+  const since = (now - steps.last) / 1000;
+  if (since < 1.6) steps.gap += (clamp(since, 0.35, 1.2) - steps.gap) * 0.5;
+  steps.last = now; footfall = true;
+}
+function stepPace(dt) {
+  const since = (performance.now() - steps.last) / 1000, going = since < steps.gap * 1.4 + 0.15;
+  steps.speed += ((going ? STRIDE / steps.gap : 0) - steps.speed) * (1 - Math.exp(-dt * (going ? 4 : 3)));
+  if (steps.speed < 0.02) steps.speed = 0;
+  return steps.speed;
+}
 
 function startPhoneSensors() {
   const listenTurn = () => addEventListener('deviceorientation', (e) => {
@@ -105,13 +118,15 @@ function startPhoneSensors() {
     if (!gyro.on) { gyro.on = gyro.align = true; $('phone').classList.add('on'); setTimeout(() => $('phone').classList.remove('on'), 7000); }
   });
   const listenSteps = () => {
-    let level = 9.8, armed = true, last = 0;
+    let level = 9.8, smooth = 9.8, armed = true, last = 0;
     addEventListener('devicemotion', (e) => {
       const a = e.accelerationIncludingGravity;
       if (!a || a.x === null) return;
-      const size = Math.hypot(a.x, a.y, a.z), rise = size - level, now = performance.now();
-      level += (size - level) * 0.05;
-      if (armed && rise > 1.3 && now - last > 320) { stepping = STEP_TIME; footfall = true; last = now; armed = false; } else if (rise < 0.3) armed = true;
+      const size = Math.hypot(a.x, a.y, a.z), now = performance.now();
+      smooth += (size - smooth) * 0.35;              // steady the hand's jitter, so one step isn't counted twice
+      level += (size - level) * 0.04;
+      const rise = smooth - level;
+      if (armed && rise > 1.0 && now - last > 280) { stepTaken(now); last = now; armed = false; } else if (rise < 0.2) armed = true;
     });
   };
   const askTurn = window.DeviceOrientationEvent?.requestPermission, askSteps = window.DeviceMotionEvent?.requestPermission;   // iPhones ask first, and only from a tap
@@ -173,7 +188,7 @@ function footsteps(dt) {
   if (player.airTime > 0.25) landing = Math.max(landing, player.airTime);
   else if (landing && player.airTime === 0) { sound.step(surface(), clamp(0.8 + landing, 1, 1.6)); landing = 0; pace = 0; }
   if (footfall) { footfall = false; sound.step(surface(), 0.9); return; }
-  if (stepping > 0 || player.airTime > 0.12 || player.speed < 0.2 * WALK) { pace = 0.5; return; }
+  if (steps.speed > 0 || player.airTime > 0.12 || player.speed < 0.2 * WALK) { pace = 0.5; return; }
   pace += dt * Math.min((player.speed * SCALE) / 1.5, 3.4);     // a pace of about 1.5 m, at most 3.4 a second
   if (pace >= 1) { pace -= 1; sound.step(surface(), clamp(0.6 + (0.4 * player.speed) / RUN, 0.6, 1)); }
 }
@@ -238,7 +253,8 @@ function frame() {
 
 function simulate(dt) {
   readInput();
-  if (stepping > 0) { stepping -= dt; input.y = 1; input.speed = STRIDE / STEP_TIME; } else input.speed = undefined;
+  const paced = stepPace(dt);
+  if (paced > 0) { input.y = 1; input.speed = paced; } else input.speed = undefined;
   player.update(dt, input);
 }
 
@@ -343,12 +359,25 @@ function bindControls() {
 
   $('music').addEventListener('click', toggleMusic);
   showMusic();
+  const openPlaces = (open) => { $('places').classList.toggle('open', open); $('placesBtn').setAttribute('aria-expanded', open); };
+  $('placesBtn').addEventListener('click', () => openPlaces(!$('places').classList.contains('open')));
   PLACES.forEach((p, i) => {
     const b = document.createElement('button');
     b.innerHTML = `${p.name}<kbd>${i + 1}</kbd>`;
-    b.addEventListener('click', () => teleport(i));
+    b.addEventListener('click', () => { teleport(i); openPlaces(false); });
     $('places').append(b);
   });
+  // full screen where the browser allows it; an iPhone instead runs full screen from the home screen
+  const root = document.documentElement, request = root.requestFullscreen ?? root.webkitRequestFullscreen;
+  if (request) {
+    $('full').hidden = false;
+    $('full').addEventListener('click', () => (document.fullscreenElement || document.webkitFullscreenElement) ? (document.exitFullscreen ?? document.webkitExitFullscreen).call(document) : fullScreen());
+  }
+}
+
+function fullScreen() {
+  const root = document.documentElement, request = root.requestFullscreen ?? root.webkitRequestFullscreen;
+  try { request?.call(root, { navigationUI: 'hide' })?.catch?.(() => {}); } catch { /* refused: carry on in the page */ }
 }
 
 function showMusic() { $('music').setAttribute('aria-pressed', sound.musicOn); }
@@ -373,20 +402,20 @@ async function start() {
   renderer.compile(world.scene, camera);
   updateCamera(0.016);
   renderer.render(world.scene, camera);
-  if (debug) window.walk = { player, keys, input, world, camera, teleport, renderer, fps: 0, PLACES, simulate, tick, look, gyro, sound, surface, step: () => { stepping = STEP_TIME; footfall = true; } };
+  if (debug) window.walk = { player, keys, input, world, camera, teleport, renderer, fps: 0, PLACES, simulate, tick, look, gyro, sound, surface, step: () => stepTaken(performance.now()), steps };
   frame();
 
   $('bar').style.display = 'none';
   const enter = $('enter');
   enter.hidden = false;
-  enter.focus();
+  enter.focus({ preventScroll: true });
   enter.addEventListener('click', () => {
     clearInterval(sheetTimer);
     $('intro').classList.add('gone');
     $('hud').classList.add('on');
     started = true;
     sound.start();
-    if (touch) startPhoneSensors();
+    if (touch) { fullScreen(); startPhoneSensors(); }
     else canvas.requestPointerLock?.()?.catch?.(() => {});
   });
 }

@@ -1049,12 +1049,13 @@ def lion_mesh(name="lion"):
 
 def inscription(c, M):
     """Three lines in the core's face below the bridge, where the elevation shows them, wrapped
-    round the cylinder. The last words echo Newton's epitaph in Westminster Abbey."""
+    round the cylinder. His name stands as on his tomb in Westminster Abbey, ISAACVS NEWTON, and
+    the last words echo its epitaph."""
     path = "/System/Library/Fonts/Supplemental/Times New Roman.ttf"
     font = bpy.data.fonts.load(path) if os.path.exists(path) else None
     r = D["core_R"]
     bm = bmesh.new()
-    for text, size, z in (("ISAACO NEWTONO", 2.3, 37.6), ("QVI NATVRAE LEGES PATEFECIT", 1.55, 35.1), ("HVMANI GENERIS DECVS", 1.55, 32.9)):
+    for text, size, z in (("ISAACVS NEWTON", 2.3, 37.6), ("QVI NATVRAE LEGES PATEFECIT", 1.55, 35.1), ("HVMANI GENERIS DECVS", 1.55, 32.9)):
         cu = bpy.data.curves.new("line", "FONT")
         cu.body = text; cu.size = size; cu.align_x = "CENTER"; cu.extrude = 0.025; cu.resolution_u = 4; cu.space_character = 1.14
         if font:

@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>Cénotaphe de Newton</title>
+<meta name="theme-color" content="#0c0f14">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cénotaphe">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
 <meta name="description" content="Walk through Étienne-Louis Boullée's unbuilt 1784 monument to Isaac Newton, modelled to scale from his drawings.">
 <style>
   :root { --ink: #f2ece0; --dim: rgba(242, 236, 224, .62); --line: rgba(242, 236, 224, .24); --bg: #0c0f14;
@@ -49,12 +56,15 @@
   #places button { padding: 3px 4px; opacity: .78; transition: opacity .15s; }
   #places button:hover, #places button:focus-visible { opacity: 1; outline: none; text-decoration: underline; text-underline-offset: 3px; }
   #places kbd { font: inherit; opacity: .6; margin-left: 7px; }
-  #music { position: absolute; right: 16px; bottom: 14px; padding: 5px 9px; border-radius: 3px; background: rgba(12, 15, 20, .3); pointer-events: auto; opacity: .78; transition: opacity .15s; }
-  #music:hover, #music:focus-visible { opacity: 1; outline: none; }
+  #corner { position: absolute; right: 16px; bottom: max(14px, env(safe-area-inset-bottom)); display: flex; gap: 8px; pointer-events: auto; }
+  #corner button { padding: 5px 9px; border-radius: 3px; background: rgba(12, 15, 20, .3); opacity: .78; transition: opacity .15s; }
+  #corner button:hover, #corner button:focus-visible { opacity: 1; outline: none; }
+  #full[hidden] { display: none; }
+  #placesBtn { display: none; }
   #music[aria-pressed="false"] { text-decoration: line-through; text-decoration-thickness: 1px; opacity: .55; }
   #music kbd { font: inherit; opacity: .6; margin-left: 7px; }
   .touch #music kbd { display: none; }
-  .no-sensors #music { bottom: 116px; }
+  .no-sensors #corner { bottom: 116px; }
   #keys { position: absolute; left: 22px; bottom: 18px; line-height: 1.75; opacity: .82; transition: opacity 1s; }
   #keys.faded { opacity: 0; }
   #keys b { font-weight: 500; }
@@ -69,7 +79,20 @@
   #jump { right: 26px; bottom: 34px; width: 66px; height: 66px; color: #fff; font-size: 12px; }
   .no-sensors #stick, .no-sensors #jump { display: block; }
   .touch #keys { display: none; }
-  @media (max-width: 720px) { #places { font-size: 12px; right: 10px; top: 10px; } #where { font-size: 17px; left: 14px; top: 12px; max-width: 42vw; } #where small { display: none; } }
+  /* phones: the places fold away behind one button, and the title screen reads as a page with Enter always in reach */
+  @media (max-width: 720px), (max-height: 500px) {
+    #hud { padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+    #where { font-size: 17px; left: 12px; top: max(10px, env(safe-area-inset-top)); max-width: 52vw; }
+    #where small { display: none; }
+    #placesBtn { display: block; position: absolute; right: 10px; top: max(10px, env(safe-area-inset-top)); padding: 6px 10px; border-radius: 3px; background: rgba(12, 15, 20, .4); pointer-events: auto; }
+    #places { display: none; top: calc(max(10px, env(safe-area-inset-top)) + 38px); right: 10px; font-size: 14px; background: rgba(12, 15, 20, .72); }
+    #places.open { display: grid; }
+    #places button { padding: 7px 6px; }
+    #intro { align-content: start; gap: 14px; padding: max(16px, env(safe-area-inset-top)) 18px 0; }
+    #intro h1 { font-size: 34px; }
+    #intro p { text-align: left; font-size: 14px; line-height: 1.5; }
+    #enter { position: sticky; bottom: max(14px, env(safe-area-inset-bottom)); width: 100%; margin-bottom: 14px; background: var(--bg); box-shadow: 0 14px 0 14px var(--bg), 0 -18px 18px 4px var(--bg); }
+  }
 </style>
 </head>
 <body>
@@ -91,12 +114,16 @@
 </div>
 <div id="hud">
   <div id="where"><span id="whereName"></span><small id="whereNote"></small></div>
+  <button id="placesBtn" aria-controls="places" aria-expanded="false">Places</button>
   <nav id="places" aria-label="Go to a place"></nav>
   <div id="keys"><b>WASD</b> walk &nbsp;·&nbsp; <b>Shift</b> run &nbsp;·&nbsp; <b>Space</b> jump &nbsp;·&nbsp; <b>Mouse</b> look &nbsp;·&nbsp; <b>Esc</b> free the cursor &nbsp;·&nbsp; <b>Hold T</b> run the sun &nbsp;·&nbsp; <b>[ ]</b> field of view &nbsp;·&nbsp; <b>M</b> music</div>
   <div id="phone">Turn to look, and walk to move</div>
   <div id="stick"><i></i></div>
   <button id="jump">Jump</button>
-  <button id="music" aria-label="Music" aria-pressed="true">♪ Haydn<kbd>M</kbd></button>
+  <div id="corner">
+    <button id="full" aria-label="Full screen" hidden>⤢ Full screen</button>
+    <button id="music" aria-label="Music" aria-pressed="true">♪ Haydn<kbd>M</kbd></button>
+  </div>
 </div>
 <script type="module" src="app.js"></script>
 </body>
