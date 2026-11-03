@@ -1,6 +1,7 @@
 // Visitors as paper cut-outs: Parisians of Boullée's own years, from the engraved plates of the
 // Galerie des Modes et Costumes Français (1778–1787, Rijksmuseum, CC0), printed here in one ink.
 // Each stands upright and turns to face you, as a figure cut from a print would be propped up.
+// Some stand about; others walk, and move() carries them along.
 import * as THREE from 'three';
 
 // how tall each plate's figure stands, hair and hat included, in metres
@@ -8,20 +9,22 @@ const HEIGHT = { '00': 2.05, '01': 1.95, '02': 2.15, '03': 1.85, '05': 1.8, '07'
 
 export function makeCutouts(sheet, places, spots, { scale, rand, light }) {
   const n = spots.length, at = new Float32Array(n * 3), size = new Float32Array(n * 2), rect = new Float32Array(n * 4), shade = new Float32Array(n);
-  spots.forEach(([x, y, z, indoors], i) => {
+  spots.forEach(([x, y, z, light], i) => {
     const p = places[Math.floor(rand() * places.length)], h = (HEIGHT[p.plate] * (0.94 + rand() * 0.08)) / scale, flip = rand() < 0.5;
     at.set([x, y, z], i * 3);
     size.set([h * p.aspect, h], i * 2);
     rect.set(flip ? [p.u1, p.v0, p.u0, p.v1] : [p.u0, p.v0, p.u1, p.v1], i * 4);
-    shade[i] = indoors ? 0.16 : 1;
+    shade[i] = light;
   });
+  const moving = [];
   const geo = (base) => {
     const g = new THREE.InstancedBufferGeometry().copy(base);
     g.instanceCount = n;
     g.setAttribute('at', new THREE.InstancedBufferAttribute(at, 3));
+    g.setAttribute('shade', new THREE.InstancedBufferAttribute(shade, 1));
+    moving.push(g.attributes.at, g.attributes.shade);
     g.setAttribute('size', new THREE.InstancedBufferAttribute(size, 2));
     g.setAttribute('rect', new THREE.InstancedBufferAttribute(rect, 4));
-    g.setAttribute('shade', new THREE.InstancedBufferAttribute(shade, 1));
     return g;
   };
 
@@ -56,5 +59,9 @@ export function makeCutouts(sheet, places, spots, { scale, rand, light }) {
     fragmentShader: `varying vec2 vP; void main(){ float r = dot(vP, vP); gl_FragColor = vec4(0.0, 0.0, 0.0, 0.32 * (1.0 - smoothstep(0.2, 1.0, r))); }`,
   }));
   shadow.frustumCulled = false;
-  return [paper, shadow];
+  return {
+    meshes: [paper, shadow],
+    move(i, x, y, z, light) { at[i * 3] = x; at[i * 3 + 1] = y; at[i * 3 + 2] = z; shade[i] = light; },
+    moved() { for (const a of moving) a.needsUpdate = true; },
+  };
 }

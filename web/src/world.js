@@ -28,7 +28,7 @@ export function groundHeight(x, z) {
 }
 
 const NOT_SOLID = new Set(['Main stair', 'Front stair block', 'Planting beds', 'Lions', 'Funeral brazier', 'Inscription',
-                           'Esplanade and walks', 'Drum dentils', 'Bridge portal door']);
+                           'Esplanade and walks', 'Drum dentils', 'Bridge portal door', 'Sarcophagus dais', 'Passage stairs']);
 
 // ------------------------------------------------------------------ texturing
 function load(name, srgb, renderer, manager) {
@@ -98,9 +98,9 @@ function stoneUVs(source, tile, sphere) {
     } else if (Math.abs(n.y) > 0.65) {
       us = pts.map((v) => v.x); vs = pts.map((v) => v.z);
     } else if (onCone) {
-      us = pts.map((v) => Math.atan2(v.x, CENTER.y - v.y) * coneR); vs = pts.map((v) => v.z);
+      us = pts.map((v) => Math.atan2(v.x, CENTER.y - v.y) * Math.hypot(v.x, v.y - CENTER.y)); vs = pts.map((v) => v.z);
     } else if (radial > 0.85) {
-      us = unwrap(pts.map((v) => Math.atan2(v.z, v.x)), Math.PI * 2).map((v) => v * R); vs = pts.map((v) => v.y);
+      us = unwrap(pts.map((v) => Math.atan2(v.z, v.x)), Math.PI * 2).map((v, k) => v * Math.hypot(pts[k].x, pts[k].z)); vs = pts.map((v) => v.y);   // each corner at its own radius, so neighbours agree
     } else {
       us = pts.map((v) => (Math.abs(n.x) > Math.abs(n.z) ? v.z : v.x)); vs = pts.map((v) => v.y);
     }
@@ -111,13 +111,61 @@ function stoneUVs(source, tile, sphere) {
 }
 
 /**
+ * The passage a face lies in, if any, as the line its courses run along: the front passage with its
+ * landing and the two stairs behind the centre, or the east-west passage. Walls and vaults then take
+ * courses that run along that line and climb straight over the vault, so no joint breaks between faces.
+ */
+function passageAxis(x, y, z, n) {
+  if (y > 13.9) return null;                                                        // the crypt, and the sphere's floor and all above it
+  const ax = Math.abs(x);
+  if (z < -13.6 && z > -18.6 && ax < 7) return { along: 'x', at: -16.2 };          // the landing behind the centre
+  if (ax > 3.1 && ax < 6.1 && z > -16 && z < -1) return { along: 'z', at: Math.sign(x) * 4.6 };   // the stairs up into the crypt
+  if (ax < 7.3 && z > -18.6 && z < 112 && (z < 95 || Math.abs(n.z) < 0.7)) return { along: 'z', at: 0 };
+  if (Math.abs(z) < 3.6 && ax < 125 && (ax < 115 || Math.abs(n.x) < 0.7)) return { along: 'x', at: 0 };
+  return null;
+}
+
+/** Split a mesh's passage faces out of it: floors go to paving, walls and vaults to coursed ashlar. */
+function splitPassages(g, tile) {
+  const p = g.attributes.position, keys = Object.keys(g.attributes);
+  const out = { rest: [], floor: [], wall: [] }, wallUV = [];
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3(), e = new THREE.Vector3();
+  for (let i = 0; i < p.count; i += 3) {
+    a.fromBufferAttribute(p, i); b.fromBufferAttribute(p, i + 1); c.fromBufferAttribute(p, i + 2);
+    n.subVectors(b, a).cross(e.subVectors(c, a)).normalize();
+    const axis = passageAxis((a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3, (a.z + b.z + c.z) / 3, n);
+    if (!axis) { out.rest.push(i); continue; }
+    if (n.y > 0.65) { out.floor.push(i); continue; }
+    out.wall.push(i);
+    for (const v of [a, b, c]) {
+      const along = axis.along === 'z' ? v.z : v.x, across = (axis.along === 'z' ? v.x : v.z) - axis.at;
+      wallUV.push(along / tile, (v.y + Math.abs(across)) / tile);      // up the wall, then on over the vault
+    }
+  }
+  if (!out.floor.length && !out.wall.length) return null;
+  const pick = (tris) => {
+    if (!tris.length) return null;
+    const sub = new THREE.BufferGeometry();
+    for (const k of keys) {
+      const src = g.attributes[k], size = src.itemSize, arr = new Float32Array(tris.length * 3 * size);
+      tris.forEach((i, t) => { for (let j = 0; j < 3 * size; j++) arr[t * 3 * size + j] = src.array[i * size + j]; });
+      sub.setAttribute(k, new THREE.BufferAttribute(arr, size));
+    }
+    return sub;
+  };
+  const walls = pick(out.wall);
+  if (walls) walls.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(wallUV), 2));
+  return { rest: pick(out.rest), floor: pick(out.floor), walls };
+}
+
+/**
  * Daylight reaching the inside of the sphere: each bore is a small patch of sky, summed over every
  * vertex with the form factor between them. Inside a closed sphere every patch then sees every
  * other equally, so interreflection adds the same amount everywhere: mean * albedo / (1 - albedo).
  */
 // One exposure serves the whole site, so the dark interior is set permanently to where the eye would
 // settle in it, rather than changing the camera as you cross a threshold.
-const INDOORS = 1000, PASSAGES = 11;
+const INDOORS = 1000, PASSAGES = 5;      // the passages stay dim, so the eye has adjusted by the time it reaches the void
 
 // The vault is painted black, so almost all the light that bounces round the void comes off the floor
 // and the tomb, a twentieth of its surface: the void as a whole reflects about this much.
@@ -160,7 +208,7 @@ function skyThroughHoles(buffer, geometries, painted) {
 // ----------------------------------------------------------------- vegetation
 // 'Stricta' outline: a slender column drawn to a point, widest below the middle
 const cypressOutline = (t) => smooth(0, 0.08, t) ** 0.5 * (1 - t ** 2.6) ** 0.8;
-const CYPRESS_R = 1.42, CYPRESS_BASE = 0.55;
+const CYPRESS_R = 1.42, CYPRESS_BASE = 0.12;     // a cypress keeps its foliage nearly to the ground
 
 /**
  * One tree, one body: upright flame-shaped sprays packed round the trunk on a spiral, the way
@@ -172,7 +220,7 @@ function cypressTree(sprays, sides, rings, seed, H) {
   for (let i = 0; i < sprays; i++) {
     const t = ((i + 0.5) / sprays) ** 0.86, a = i * 2.39996 + (r() - 0.5) * 0.5, ca = Math.cos(a), sa = Math.sin(a);
     const edge = CYPRESS_R * cypressOutline(Math.min(t + 0.06, 1)), length = (1.9 + r() * 1.0) * (1 - 0.42 * t) * (0.75 + 0.25 * fat);
-    const width = Math.max(0.12, (0.27 + r() * 0.1) * fat * (1.05 - 0.6 * t)), low = CYPRESS_BASE + t * (H - CYPRESS_BASE - length * 0.55);
+    const width = Math.max(0.1, (0.2 + r() * 0.08) * fat * (1.05 - 0.6 * t)), low = CYPRESS_BASE + t * (H - CYPRESS_BASE - length * 0.55);
     const hip = new THREE.Vector3(ca * edge * 0.3, low, sa * edge * 0.3), tip = new THREE.Vector3(ca * edge * (0.72 + r() * 0.26), low + length, sa * edge * (0.72 + r() * 0.26));
     axis.subVectors(tip, hip).normalize(); side.set(-sa, 0, ca); out.crossVectors(side, axis).negate();
     const base = pos.length / 3, tone = (0.6 + 0.46 * smooth(0, 0.4, t)) * (0.78 + r() * 0.42);
@@ -221,8 +269,8 @@ function makeTrees(buffer, foliage, scene) {
   const VARIANTS = 3, heights = [10.0, 10.7, 11.2], r = rng(7), hash = new TreeHash(6);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3(), yAxis = new THREE.Vector3(0, 1, 0);
   const trees = [], tint = new THREE.Color();
-  const bark = new THREE.MeshStandardMaterial({ color: 0x3c2a1e, roughness: 0.95 });
-  const trunkGeo = new THREE.CylinderGeometry(0.11, 0.2, 1.7, 6, 1, true).translate(0, 0.75, 0);
+  const bark = new THREE.MeshLambertMaterial({ color: 0x241d17 });   // in the shade of its own crown
+  const trunkGeo = new THREE.CylinderGeometry(0.09, 0.17, 0.9, 6, 1, true).translate(0, 0.35, 0);
   const trunks = new THREE.InstancedMesh(trunkGeo, bark, nTrees);
   // Each detail level hands over to the next across a band of distance, its pixels thinning out in a
   // fine dither as the next one's fill in, measured from the eye every frame, so no tree ever swaps.
@@ -235,6 +283,13 @@ function makeTrees(buffer, foliage, scene) {
       s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vTreeAt;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTreeAt = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xz;');
       s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec4 bands; varying vec2 vTreeAt;')
+        // close up, where the crown turns away from the eye its edge breaks into tufts, not a smooth hard outline
+        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+          #if LOD == 0
+            float rim = 1.0 - abs(dot(normalize(vNormal), normalize(vViewPosition)));
+            float tuft = fract(sin(dot(floor(vMapUv * vec2(26.0, 34.0)), vec2(12.9898, 78.233))) * 43758.5453);
+            if (rim > 0.42 + 0.5 * tuft) discard;
+          #endif`)
         .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
           float d = distance(vTreeAt, cameraPosition.xz), n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
           float a = 1.0 - smoothstep(bands.x, bands.y, d), b = 1.0 - smoothstep(bands.z, bands.w, d);
@@ -250,7 +305,7 @@ function makeTrees(buffer, foliage, scene) {
   });
   const sets = [];
   for (let v = 0; v < VARIANTS; v++) {
-    sets.push([[120, 5, 4], [46, 4, 3], [18, 3, 2]].map(([sprays, sides, rings], lod) => {
+    sets.push([[170, 5, 4], [46, 4, 3], [18, 3, 2]].map(([sprays, sides, rings], lod) => {
       const mesh = new THREE.InstancedMesh(cypressTree(sprays, sides, rings, v * 9.1, heights[v]), levels[lod], nTrees);
       mesh.frustumCulled = false; mesh.receiveShadow = mesh.castShadow = true; mesh.count = 0;
       scene.add(mesh);
@@ -343,7 +398,8 @@ function makeBasin() {
       float w(vec2 p, float t){ return sin(p.x * 0.9 + t) * sin(p.y * 0.33 - t * 0.6) + 0.5 * sin(p.x * 2.3 - t * 1.3 + p.y * 1.1); }
       void main(){
         vec3 v = normalize(cameraPosition - vW);
-        vec2 r = vec2(w(vW.xz, time), w(vW.zx + 7.0, time * 0.8)) * 0.0032 * smoothstep(900.0, 40.0, length(cameraPosition - vW));
+        vec2 r = vec2(w(vW.xz, time), w(vW.zx + 7.0, time * 0.8)) * 0.0032 * smoothstep(900.0, 40.0, length(cameraPosition - vW))
+               * smoothstep(0.0, 1.2, 20.0 - abs(vW.x));   // still against the coping, or the ripple shows sky along its foot
         vec3 c = texture2DProj(tDiffuse, vUv + vec4(r * vUv.w, 0.0, 0.0)).rgb;
         float f = 0.06 + 0.94 * pow(1.0 - clamp(v.y, 0.0, 1.0), 4.0);
         gl_FragColor = vec4(mix(vec3(0.012, 0.024, 0.028), c, clamp(f + 0.32, 0.0, 1.0)), 1.0);
@@ -589,16 +645,67 @@ function makeFire() {
   };
 }
 
-function makeVisitors(scene, sheet, places) {
-  const r = rng(5), spots = [[-8, 5.5, 132, 5], [9, 5.5, 136, 3], [-6, 5.5, 112, 4], [11, 5.5, 116, 3], [-14, 46.5, 96, 4], [10, 46.5, 98, 3],
-                             [-17, 0, 178, 4], [15, 0, 188, 3], [-26, 0, 310, 2], [26, 0, 430, 3], [-24, 5.5, 150, 2], [-14, 14, -6, 4], [15, 14, 9, 4], [-9, 14, 15, 3], [16, 14, -13, 3], [4.5, 17, 3.5, 2],
+// How much light a visitor stands in: full daylight outside, little in the passages, less in the void.
+function lightAt(x, y, z) {
+  if (y < 13.9 && (Math.abs(x) < 7.3 && z > -18.6 && z < 100 || Math.abs(z) < 3.6 && Math.abs(x) < 112)) return 0.3;
+  return Math.hypot(x, y - CENTER.y, z) < 67 ? 0.16 : 1;
+}
+
+// The floor under a point, found by looking down from a little above it. Starting just above the
+// last floor keeps the search under a passage's vault rather than on the terrace over it.
+function floorBelow(bvh, x, y, z, ray = new THREE.Ray()) {
+  ray.origin.set(x, y, z); ray.direction.set(0, -1, 0);
+  const hit = bvh.raycastFirst(ray, THREE.DoubleSide);
+  return hit ? hit.point.y : y - 1;
+}
+
+// Tourists' way in: up from the esplanade, through the arch and the passage to the landing behind the
+// centre, up the stair into the crypt, and out of its front door into the sphere.
+const ROUTE = [[0, 206], [0, 160], [0, 126], [0, 112], [0, 96], [0, -15.6], [4.6, -15.6], [4.6, -1.2], [0, 1.5], [0, 17], [7, 23], [15, 21]];
+
+function makeVisitors(scene, sheet, places, bvh) {
+  const r = rng(5), ray = new THREE.Ray(), spots = [[-8, 5.5, 132, 5], [9, 5.5, 136, 3], [-6, 5.5, 112, 4], [11, 5.5, 116, 3], [-14, 46.5, 96, 4], [10, 46.5, 98, 3],
+                             [-17, 0, 178, 4], [15, 0, 188, 3], [-26, 0, 310, 2], [26, 0, 430, 3], [-24, 5.5, 150, 2], [-14, 14, -20, 4], [19, 14, 9, 4], [-9, 14, 21, 3], [21, 14, -13, 3], [4.5, 18.6, 3.5, 2],
                              [-30, 5.5, 140, 5], [34, 5.5, 128, 4], [0, 0, 198, 6], [6, 64, 73, 3], [-22, 46.5, 92, 3], [24, 0, 640, 3], [-27, 0, 560, 2]];
   const people = [];
   for (const [x, y, z, n] of spots) for (let i = 0; i < n; i++) {
-    const px = x + (r() - 0.5) * 4, pz = z + (r() - 0.5) * 4;
-    people.push([px, y, pz, Math.hypot(px, y - CENTER.y, pz) < 67]);
+    const px = x + (r() - 0.5) * 4, pz = z + (r() - 0.5) * 4, py = floorBelow(bvh, px, y + 3, pz, ray);   // standing on whatever is there
+    people.push([px, py, pz, lightAt(px, py, pz)]);
   }
-  scene.add(...makeCutouts(sheet, places, people, { scale: SCALE, rand: r, light: FIGURE_LIGHT }));
+
+  // the route sampled every half metre, each sample on the floor beneath it
+  const path = [];
+  let y = 1;
+  for (let k = 1; k < ROUTE.length; k++) {
+    const [x0, z0] = ROUTE[k - 1], [x1, z1] = ROUTE[k], n = Math.ceil(Math.hypot(x1 - x0, z1 - z0) / 0.5);
+    for (let j = k === 1 ? 0 : 1; j <= n; j++) {
+      const x = x0 + (x1 - x0) * j / n, z = z0 + (z1 - z0) * j / n;
+      y = floorBelow(bvh, x, y + 1.2, z, ray);
+      path.push([x, y, z]);
+    }
+  }
+  const WALKERS = 14, first = people.length, walkers = [];
+  for (let i = 0; i < WALKERS; i++) {
+    walkers.push({ s: (i / WALKERS) * path.length * 2, side: (r() - 0.5) * 0.5, speed: (0.85 + r() * 0.3) * 1.3 / SCALE, phase: r() * 6 });
+    people.push([0, 0, 0, 1]);
+  }
+  const cut = makeCutouts(sheet, places, people, { scale: SCALE, rand: r, light: FIGURE_LIGHT });
+  scene.add(...cut.meshes);
+  return {
+    // each walks the route in, turns, and walks it out again, keeping to the right
+    update(dt) {
+      for (const [i, w] of walkers.entries()) {
+        w.s = (w.s + dt * w.speed * 2) % (path.length * 2);
+        const back = w.s >= path.length, at = back ? path.length * 2 - 1 - w.s : w.s;
+        const k = Math.max(0, Math.min(path.length - 2, Math.floor(at))), f = at - k, p0 = path[k], p1 = path[k + 1];
+        const dx = p1[0] - p0[0], dz = p1[2] - p0[2], l = Math.hypot(dx, dz) || 1, keep = (back ? -1 : 1) * (0.35 + w.side) / SCALE;
+        const x = p0[0] + dx * f - (dz / l) * keep, z = p0[2] + dz * f + (dx / l) * keep;
+        const yy = p0[1] + (p1[1] - p0[1]) * f + Math.abs(Math.sin(w.s * 6.2 + w.phase)) * 0.025 / SCALE;   // a step's lift
+        cut.move(first + i, x, yy, z, lightAt(x, yy, z));
+      }
+      cut.moved();
+    },
+  };
 }
 
 // ----------------------------------------------------------------------- load
@@ -625,7 +732,7 @@ export async function loadWorld(renderer, onProgress) {
   const soil = std({ map: T('soil', true), roughness: 0.97 });
   const leaves = T('cypress', true);
   const foliage = new THREE.MeshLambertMaterial({ map: leaves, normalMap: T('cypress_n'), normalScale: nS(1.0), vertexColors: true,   // matte: leaves don't mirror the sky
-                                                  emissive: 0x4c5a4c, emissiveMap: leaves });                                          // this material ignores the sky, so its light is added here
+                                                  emissive: 0x3c4a40, emissiveMap: leaves });                                          // this material ignores the sky, so its light is added here
   const grass = [T('grass', true), T('grass_n')];
   const MATS = {
     'Vault: pierced shell (star holes)': [vault, 12, true], Bore: [boreStone, 12 / SCALE], 'Limestone ashlar': [ashlar, 15.6 / SCALE], 'Limestone dressed': [dressed, 12 / SCALE], 'Limestone sphere': [sphere, 12, true],
@@ -662,7 +769,7 @@ export async function loadWorld(renderer, onProgress) {
         const c = g.attributes.color, pos = g.attributes.position, baked = new Float32Array(c.count * 3);
         for (let v = 0; v < c.count; v++) {
           const x = pos.getX(v), y = pos.getY(v), z = pos.getZ(v);
-          const inFront = Math.abs(x) < 7.3 && z > 0 && z < 110, inSide = Math.abs(z) < 3.5 && Math.abs(x) < 125;
+          const inFront = Math.abs(x) < 7.3 && z > -18.6 && z < 110, inSide = Math.abs(z) < 3.5 && Math.abs(x) < 125;
           const depth = y < 14.1 ? (inFront ? 108 - z : inSide ? 121 - Math.abs(x) : 0) : 0, k = 1 + (PASSAGES - 1) * smooth(0, 14, depth);
           const least = name === 'Basin coping' ? 0.55 : 0;   // its sides meet the ground, where the bake's vertices went dark
           baked[v * 3] = Math.max(c.getX(v) * k, least); baked[v * 3 + 1] = Math.max(c.getY(v) * k, least); baked[v * 3 + 2] = Math.max(c.getZ(v) * k, least);
@@ -672,9 +779,26 @@ export async function loadWorld(renderer, onProgress) {
       }
       mesh.geometry = g;
       mesh.material = mat;
-      if (key.startsWith('Vault') || name === 'Interior floor' || name.startsWith('Sarcophagus')) inside.push(g);
+      // every passage in one stone, whatever solid it was cut through: paved floors, coursed walls and vaults
+      const split = splitPassages(g, 15.6 / SCALE);
+      if (split) {
+        if (split.rest) mesh.geometry = split.rest; else mesh.visible = false;
+        for (const [geo, m, tile] of [[split.floor, paving, 6.4 / SCALE], [split.walls, ashlar, 0]]) {
+          if (!geo) continue;
+          if (tile) {
+            const pos = geo.attributes.position, uv = new Float32Array(pos.count * 2);
+            for (let v = 0; v < pos.count; v++) { uv[v * 2] = pos.getX(v) / tile; uv[v * 2 + 1] = pos.getZ(v) / tile; }
+            geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+          }
+          const part = new THREE.Mesh(geo, m);
+          part.position.copy(mesh.position); part.quaternion.copy(mesh.quaternion); part.scale.copy(mesh.scale);
+          part.castShadow = part.receiveShadow = true;
+          mesh.parent.add(part);
+        }
+      }
+      if (key.startsWith('Vault') || name === 'Interior floor' || name.startsWith('Sarcophagus')) inside.push(mesh.geometry);
     }
-    mesh.castShadow = key !== 'Planting bed (soil, needle litter)';
+    mesh.castShadow = key !== 'Planting bed (soil, needle litter)' && name !== 'Esplanade and walks' && name !== 'Basin coping';   // low and flat, they would shadow only themselves, in stripes
     mesh.receiveShadow = true;
   }
   const figures = makeFigures(figureList);
@@ -694,9 +818,21 @@ export async function loadWorld(renderer, onProgress) {
   sky.material.depthTest = false; sky.renderOrder = -1;   // it sits at the far plane, which the reversed depth buffer would put in front
   const fire = makeFire();
   scene.add(fire.group);
-  makeVisitors(scene, figureSheet, figurePlaces);
-  const lamps = makeLamps(lampBuf);
-  scene.add(lamps, makeSconces(lampBuf, bvh));
+  const visitors = makeVisitors(scene, figureSheet, figurePlaces, bvh);
+  // the baked lamps line the passages; the stairs up into the crypt and the crypt itself have lamps
+  // of their own, lit live, since the bake doesn't reach them
+  const LIVE = [[5.5, 12.2, -8.5], [-5.5, 12.2, -8.5], [3.6, 16.4, 6.3], [-3.6, 16.4, 6.3]];
+  const baked = new Float32Array(lampBuf, 4, new Uint32Array(lampBuf, 0, 1)[0] * 3), all = new ArrayBuffer(4 + (baked.length + LIVE.length * 3) * 4);
+  new Uint32Array(all, 0, 1)[0] = baked.length / 3 + LIVE.length;
+  new Float32Array(all, 4).set([...baked, ...LIVE.flat()]);
+  const lamps = makeLamps(all);
+  scene.add(lamps, makeSconces(all, bvh));
+  const lampLight = LIVE.map(([x, y, z]) => {
+    const l = new THREE.PointLight(0xffb070, 0, 13, 2);
+    l.position.set(x * 0.9, y + 0.2, z * 0.97);
+    scene.add(l);
+    return l;
+  });
 
 
   // The sun is the only light here. Outdoors its shadow map covers the whole site; underground and
@@ -749,6 +885,6 @@ export async function loadWorld(renderer, onProgress) {
   shafts.mesh.visible = false;
   scene.add(shafts.mesh);
 
-  return { scene, bvh, trees, water, sky, fire, sun, setSun, refresh, shadowsClose, lamps, shafts, tomb, sunStrength: () => sunStrength };
+  return { scene, bvh, trees, water, sky, fire, visitors, lampLight, sun, setSun, refresh, shadowsClose, lamps, shafts, tomb, sunStrength: () => sunStrength };
 
 }

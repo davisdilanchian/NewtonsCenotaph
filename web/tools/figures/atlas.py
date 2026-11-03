@@ -1,8 +1,8 @@
-# Pack the inked figures into one sheet, trimmed to their outlines, each 480 px high, with their places in it.
+# Pack the inked figures into one sheet, trimmed to their outlines, each 960 px high, with their places in it.
 import json, subprocess, sys
 d, out = sys.argv[1], sys.argv[2]
 N = ['00', '01', '02', '03', '05', '07', '09', '10', '13', '14', '16']
-H, W, ROW, PAD = 480, 2048, 512, 12
+H, W, ROW, PAD = 960, 4096, 1024, 24
 x = y = 0; places = []; layers = []
 for n in N:
     subprocess.run(['magick', f'{d}/e{n}.png', '-alpha', 'background', '-bordercolor', 'none', '-border', '1', '-trim', '+repage', '-resize', f'x{H}', f'{d}/a{n}.png'], check=True)

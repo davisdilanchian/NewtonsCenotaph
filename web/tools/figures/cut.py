@@ -8,6 +8,7 @@ d = sys.argv[1]
 BOX = json.load(open(f'{d}/boxes.json'))
 GROUND = json.load(open(f'{d}/ground.json'))
 T = sys.argv[2] if len(sys.argv) > 2 else '11'
+THRESH = {'05': '6'}                             # pale faces drawn with a fine line need a finer threshold
 def run(*a): subprocess.run(['magick', *a], check=True)
 def out(*a): return subprocess.check_output(['magick', *a]).decode()
 
@@ -56,7 +57,7 @@ for key, (x0, y0, x1, y1) in BOX.items():
     bg = max(corners, key=lambda c: float(c[0]))[1]
     m = f'{d}/m{n:02d}.pgm'
     run(k, '(', '+clone', '-fill', bg, '-colorize', '100', ')', '-compose', 'difference', '-composite',
-        '-colorspace', 'gray', '-threshold', f'{T}%', '-depth', '8', m)
+        '-colorspace', 'gray', '-threshold', f'{THRESH.get(key, T)}%', '-depth', '8', m)
     clean(m, GROUND.get(key))                        # the ruled lines go while they are still thin
     run(m, '-morphology', 'close', 'disk:7',         # seal gaps in the engraved outline so faces and pale silk count as enclosed
         '-bordercolor', 'black', '-border', '2', '-fill', 'gray50', '-draw', 'color 0,0 floodfill',

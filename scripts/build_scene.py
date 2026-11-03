@@ -28,7 +28,9 @@ D = dict(
     stair_half_w=21.0, stair_inner_y=-139.0, stair_rise=0.06, stair_steps=92,
     tunnel_half_w=7.0, tunnel_spring=6.5,      # the arch at the sphere's foot, now a sealed door
     passage_half_w=2.2, passage_h=3.9, passage_z=5.52,   # section: 3.9 high, level with the terrace
-    floor_top=14.0, mound_top=17.0,             # the raised floor, and the mound the sarcophagus stands on
+    floor_top=14.0, mound_top=18.6,             # the raised floor, and the stepped dais the sarcophagus stands on
+    dais_base_half=15.0, dais_top_half=7.5, dais_steps=20,   # the interior sheet's trapezoid, read as a square stepped dais
+    tomb_focus=19.0,                            # where every bore points: the light of the whole vault gathers here
     people_scale=3.0,                           # figures drawn this much smaller, so the site reads 450 m
     v_bottom_half=39.5, v_top_half=10.3,        # front stair block: half-widths, base and top
     stair_block_y=-87.0, stair_block_back=-70.0,  # its front face, and its back, buried in the shell
@@ -145,20 +147,40 @@ def passage(points, step=3.5):
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     return bm
 
+FLANK_X, FLANK_W, FLANK_H = 4.6, 1.2, 3.4     # the two stairs that turn back up into the crypt
+STAIR_FOOT, STAIR_HEAD = 15.0, 2.0              # where they start, behind the centre, and where they arrive
+
 def passages():
     """The arch in the elevation, in the face of the core and opening on a porch, and level passages from the east and west
-    sides of the drum, as in the section. Each rises at about 25° under the floor and comes up
-    below the sarcophagus."""
+    sides of the drum, as in the section. All three run level under the floor and meet beneath the
+    sarcophagus. The front one runs on to a landing behind it, where two stairs turn back and climb
+    into the crypt inside the dais, so a visitor steps out through its doorway into the sphere."""
     z, w, h, ft = D["passage_z"], D["passage_half_w"], D["passage_h"], D["floor_top"]
     tw, top = D["tunnel_half_w"], D["tunnel_spring"] + D["tunnel_half_w"] - z
-    legs = [[(0, -110.0, z, tw, top), (0, -96.0, z, tw, top), (0, -95.8, z, w, h), (0, -29.0, z, w, h), (0, -11.0, ft, w, h)]]
-    for ax, ay in ((1, 0), (-1, 0)):
-        at = lambda r: (ax * r, ay * r)
-        legs.append([(*at(123.0), z, w + 1.2, h + 1.7), (*at(116.0), z, w, h), (*at(33.0), z, w, h), (*at(11.0), ft, w, h)])
+    land = STAIR_FOOT + w - 1.2
+    legs = [[(0, -110.0, z, tw, top), (0, -96.0, z, tw, top), (0, -95.8, z, w, h), (0, land, z, w, h)],
+            [(-FLANK_X - FLANK_W, land, z, w, h), (FLANK_X + FLANK_W, land, z, w, h)]]          # the landing
+    for ax in (1, -1):
+        legs.append([(ax * 123.0, 0, z, w + 1.2, h + 1.7), (ax * 116.0, 0, z, w, h), (0, 0, z, w, h)])
+        legs.append([(ax * FLANK_X, land, z, FLANK_W, FLANK_H), (ax * FLANK_X, STAIR_FOOT, z, FLANK_W, FLANK_H),
+                     (ax * FLANK_X, STAIR_HEAD, ft, FLANK_W, FLANK_H), (ax * FLANK_X, STAIR_HEAD - 0.6, ft, FLANK_W, FLANK_H)])
     return legs
 
+def passage_stairs():
+    """Steps for the two flights up into the crypt, laid over the cut slope: each tread's back edge
+    sits on the slope, so the slope stays hidden beneath them."""
+    z, ft = D["passage_z"], D["floor_top"]
+    n = int(round((ft - z) / 0.21))
+    rise, run = (ft - z) / n, (STAIR_FOOT - STAIR_HEAD) / n
+    bm = bmesh.new()
+    for ax in (1, -1):
+        for k in range(n):
+            y0 = STAIR_FOOT - k * run
+            box(ax * FLANK_X - FLANK_W + 0.01, ax * FLANK_X + FLANK_W - 0.01, y0 - run, y0, z - 0.3, z + (k + 1) * rise, bm)
+    return bm
+
 def passage_lamps():
-    """Oil lamps on the passage walls, every 12 units, alternating sides."""
+    """Oil lamps on the passage walls, every 12 units, in pairs facing across."""
     lamps = []
     for leg in passages():
         for p0, p1 in zip(leg, leg[1:]):
@@ -170,7 +192,8 @@ def passage_lamps():
             side = Vector((-run.y, run.x, 0)).normalized()
             for k in range(n):
                 q = a + run * ((k + 0.5) / n)
-                lamps.append(tuple(q + side * (1.9 if k % 2 else -1.9) + Vector((0, 0, 2.5))))
+                for s in (1.9, -1.9):
+                    lamps.append(tuple(q + side * s + Vector((0, 0, 2.5))))
     return lamps
 
 def star_holes():
@@ -195,7 +218,7 @@ def bore_flare(r):
 def bore_target(d):
     """Every bore points at the sarcophagus: all the light in the sphere gathers on Newton, and from
     the tomb the sky shows through every star."""
-    return Vector((0, 0, D["mound_top"] + 2.0))
+    return Vector((0, 0, D["tomb_focus"]))
 
 def hole_cutter():
     """Long straight bores through the 8 m shell, all aimed at the sarcophagus."""
@@ -656,10 +679,17 @@ def build():
     for c_ in cutters:
         boolean(plain, c_, solver="MANIFOLD")
         kill(c_)
-    mb = bmesh.new()
-    bmesh.ops.create_cone(mb, cap_ends=True, segments=96, radius1=11.0, radius2=5.0, depth=D["mound_top"] - D["floor_top"] + 0.1,
-                          matrix=Matrix.Translation((0, 0, (D["floor_top"] + D["mound_top"] - 0.1) / 2)))
-    mesh_obj("Sarcophagus mound", mb, C_MON, M["dressed"])
+    dais = mesh_obj("Sarcophagus dais", stepped_dais(), C_MON, M["dressed"])
+    hollow = bmesh.new()                                  # the crypt under the tomb, and a doorway out of each face
+    ct, dh, dw = D["floor_top"] + 3.4, 2.9, 1.2
+    box(-6.6, 6.6, -6.6, 7.4, D["floor_top"] - 0.05, ct, hollow)
+    for a in range(4):
+        door = box(-dw, dw, -D["dais_base_half"] - 1.0, -6.0, D["floor_top"] - 0.05, D["floor_top"] + dh)
+        bmesh.ops.rotate(door, verts=door.verts, cent=(0, 0, 0), matrix=Matrix.Rotation(a * math.pi / 2, 3, "Z"))
+        tmp = bpy.data.meshes.new("t"); door.to_mesh(tmp); door.free(); hollow.from_mesh(tmp); bpy.data.meshes.remove(tmp)
+    cut = temp_obj("cut_crypt", hollow)
+    boolean(dais, cut, solver="MANIFOLD"); kill(cut)
+    mesh_obj("Passage stairs", passage_stairs(), C_MON, M["dressed"])
     sz = D["mound_top"]
     sar = sarcophagus(sz)
     mesh_obj("Sarcophagus of Newton", sar, C_MON, M["dressed"])
@@ -1069,6 +1099,24 @@ def inscription(c, M):
             v.co = ((r + 0.03 + v.co.z) * math.sin(a), -(r + 0.03 + v.co.z) * math.cos(a), z + v.co.y)
         bm.from_mesh(me); bpy.data.meshes.remove(me)
     mesh_obj("Inscription", bm, c, M["dark"])
+
+def stepped_dais():
+    """The raised trapezoid of the interior sheet: a square dais of shallow steps, one closed solid."""
+    z0, z1, n = D["floor_top"], D["mound_top"], D["dais_steps"]
+    b, t = D["dais_base_half"], D["dais_top_half"]
+    rise, tread = (z1 - z0) / n, (b - t) / n
+    profile = [(b, z0 - 0.1)]
+    for k in range(n):
+        profile += [(b - k * tread, z0 + (k + 1) * rise), (b - (k + 1) * tread, z0 + (k + 1) * rise)]
+    bm = bmesh.new()
+    rings = [[bm.verts.new((sx * h, sy * h, zz)) for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))] for h, zz in profile]
+    bm.faces.new(list(reversed(rings[0]))); bm.faces.new(rings[-1])
+    for r0, r1 in zip(rings, rings[1:]):
+        for i in range(4):
+            j = (i + 1) % 4
+            bm.faces.new((r0[i], r0[j], r1[j], r1[i]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return bm
 
 def sarcophagus(z):
     """A classical tomb after the section: stepped plinth, panelled body with pilasters, dentilled
