@@ -147,36 +147,45 @@ def passage(points, step=3.5):
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     return bm
 
-FLANK_X, FLANK_W, FLANK_H = 4.6, 1.2, 3.4     # the two stairs that turn back up into the crypt
-STAIR_FOOT, STAIR_HEAD = 15.0, 2.0              # where they start, behind the centre, and where they arrive
+RING_R = 26.0                 # the curved passage that carries the front way round to the east and west ones
+RISE_FOOT, RISE_HEAD = 18.5, 3.5   # where the east and west passages start to climb, and where they arrive under the tomb
+RISE_H = 3.0                  # their height as they climb, so the dais keeps a roof over them
+CHAMBER, CHAMBER_H = 3.5, 3.0     # half width and height of the room under the sarcophagus
+
+def ring_points(sx, n=9):
+    """The curved passage from the front axis round to the east (sx = 1) or west (sx = -1) axis."""
+    return [(sx * RING_R * math.sin(math.pi / 2 * k / n), -RING_R * math.cos(math.pi / 2 * k / n)) for k in range(n + 1)]
 
 def passages():
-    """The arch in the elevation, in the face of the core and opening on a porch, and level passages from the east and west
-    sides of the drum, as in the section. All three run level under the floor and meet beneath the
-    sarcophagus. The front one runs on to a landing behind it, where two stairs turn back and climb
-    into the crypt inside the dais, so a visitor steps out through its doorway into the sphere."""
+    """The section (sheet 04): a passage runs level in from each side, then climbs at about 30°
+    under the dais, parallel to its faces, to a small room beneath the sarcophagus. The front way,
+    the elevation's arch, runs level to a curved passage that carries it round to both of those.
+    From the room a corridor leads out through the doorway in the dais's front face, the one the
+    interior sheet shows."""
     z, w, h, ft = D["passage_z"], D["passage_half_w"], D["passage_h"], D["floor_top"]
     tw, top = D["tunnel_half_w"], D["tunnel_spring"] + D["tunnel_half_w"] - z
-    land = STAIR_FOOT + w - 1.2
-    legs = [[(0, -110.0, z, tw, top), (0, -96.0, z, tw, top), (0, -95.8, z, w, h), (0, land, z, w, h)],
-            [(-FLANK_X - FLANK_W, land, z, w, h), (FLANK_X + FLANK_W, land, z, w, h)]]          # the landing
-    for ax in (1, -1):
-        legs.append([(ax * 123.0, 0, z, w + 1.2, h + 1.7), (ax * 116.0, 0, z, w, h), (0, 0, z, w, h)])
-        legs.append([(ax * FLANK_X, land, z, FLANK_W, FLANK_H), (ax * FLANK_X, STAIR_FOOT, z, FLANK_W, FLANK_H),
-                     (ax * FLANK_X, STAIR_HEAD, ft, FLANK_W, FLANK_H), (ax * FLANK_X, STAIR_HEAD - 0.6, ft, FLANK_W, FLANK_H)])
+    legs = [[(0, -110.0, z, tw, top), (0, -96.0, z, tw, top), (0, -95.8, z, w, h), (0, -RING_R, z, w, h)]]
+    for sx in (1, -1):
+        pts = ring_points(sx)
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):                  # straight pieces, each run on a little past the next joint
+            dx, dy = x1 - x0, y1 - y0; l = math.hypot(dx, dy); e = 0.8 / l
+            legs.append([(x0 - dx * e, y0 - dy * e, z, w, h), (x1 + dx * e, y1 + dy * e, z, w, h)])
+        legs.append([(sx * 123.0, 0, z, w + 1.2, h + 1.7), (sx * 116.0, 0, z, w, h), (sx * RISE_FOOT, 0, z, w, h),
+                     (sx * RISE_HEAD, 0, ft, w, RISE_H), (sx * (CHAMBER - 0.6), 0, ft, w, RISE_H)])
     return legs
 
 def passage_stairs():
-    """Steps for the two flights up into the crypt, laid over the cut slope: each tread's back edge
+    """Steps for the two flights up under the dais, laid over the cut slope: each tread's far edge
     sits on the slope, so the slope stays hidden beneath them."""
-    z, ft = D["passage_z"], D["floor_top"]
-    n = int(round((ft - z) / 0.21))
-    rise, run = (ft - z) / n, (STAIR_FOOT - STAIR_HEAD) / n
+    z, ft, w = D["passage_z"], D["floor_top"], D["passage_half_w"]
+    n = int(round((ft - z) / 0.2))
+    rise, run = (ft - z) / n, (RISE_FOOT - RISE_HEAD) / n
     bm = bmesh.new()
-    for ax in (1, -1):
+    for sx in (1, -1):
         for k in range(n):
-            y0 = STAIR_FOOT - k * run
-            box(ax * FLANK_X - FLANK_W + 0.01, ax * FLANK_X + FLANK_W - 0.01, y0 - run, y0, z - 0.3, z + (k + 1) * rise, bm)
+            r0 = RISE_FOOT - k * run
+            x0, x1 = sorted((sx * r0, sx * (r0 - run)))
+            box(x0, x1, -w + 0.01, w - 0.01, z - 0.3, z + (k + 1) * rise, bm)
     return bm
 
 def passage_lamps():
@@ -194,6 +203,13 @@ def passage_lamps():
                 q = a + run * ((k + 0.5) / n)
                 for s in (1.9, -1.9):
                     lamps.append(tuple(q + side * s + Vector((0, 0, 2.5))))
+    for sx in (1, -1):                                                # and round the curved passage
+        for x, y in ring_points(sx)[2::3]:
+            r = math.hypot(x, y)
+            for s in (1.9, -1.9):
+                lamps.append((x * (r + s) / r, y * (r + s) / r, D["passage_z"] + 2.5))
+    for sx in (1, -1):                                                # and either side of the back wall of the room under the tomb
+        lamps.append((sx * 1.9, CHAMBER - 0.3, D["floor_top"] + 2.2))
     return lamps
 
 def star_holes():
@@ -676,17 +692,14 @@ def build():
     plain = mesh_obj("Interior floor", annulus(0, 31, floor_z - 3, D["floor_top"], 128), C_MON, M["paving"])
     void = temp_obj("keep_void", uv_sphere(D["shell_inner_R"] + 0.05, CZ, 192, 96))
     boolean(plain, void, op="INTERSECT"); kill(void)                     # likewise: the floor stops at the shell
+    dais = mesh_obj("Sarcophagus dais", stepped_dais(), C_MON, M["dressed"])
     for c_ in cutters:
         boolean(plain, c_, solver="MANIFOLD")
+        boolean(dais, c_, solver="MANIFOLD")                      # the two flights climb up inside it
         kill(c_)
-    dais = mesh_obj("Sarcophagus dais", stepped_dais(), C_MON, M["dressed"])
-    hollow = bmesh.new()                                  # the crypt under the tomb, and a doorway out of each face
-    ct, dh, dw = D["floor_top"] + 3.4, 2.9, 1.2
-    box(-6.6, 6.6, -6.6, 7.4, D["floor_top"] - 0.05, ct, hollow)
-    for a in range(4):
-        door = box(-dw, dw, -D["dais_base_half"] - 1.0, -6.0, D["floor_top"] - 0.05, D["floor_top"] + dh)
-        bmesh.ops.rotate(door, verts=door.verts, cent=(0, 0, 0), matrix=Matrix.Rotation(a * math.pi / 2, 3, "Z"))
-        tmp = bpy.data.meshes.new("t"); door.to_mesh(tmp); door.free(); hollow.from_mesh(tmp); bpy.data.meshes.remove(tmp)
+    ft = D["floor_top"]
+    hollow = box(-CHAMBER, CHAMBER, -CHAMBER, CHAMBER, ft - 0.05, ft + CHAMBER_H)     # the room under the tomb
+    box(-1.2, 1.2, -D["dais_base_half"] - 1.0, -CHAMBER + 0.2, ft - 0.05, ft + 2.9, hollow)   # and its way out at the front
     cut = temp_obj("cut_crypt", hollow)
     boolean(dais, cut, solver="MANIFOLD"); kill(cut)
     mesh_obj("Passage stairs", passage_stairs(), C_MON, M["dressed"])

@@ -164,16 +164,16 @@ function teleport(i) {
 
 function show(p) { $('whereName').textContent = p.name; $('whereNote').textContent = p.note; }
 
-// in the passages: below the terrace, on to the landing behind the centre, and up the stairs to the crypt
+// in the passages: the front one, the curved one that carries it round, and the east-west one as it climbs under the dais
 function underground() {
   const { x, z } = player.pos, r = Math.hypot(x, z);
-  return player.feet < 13.9 && (Math.abs(x) < 7.2 && z > -18.6 && z < 105 || Math.abs(z) < 3.5 && r < 119);
+  return player.feet < 13.9 && (Math.abs(x) < 7.2 && z > 23 && z < 105 || Math.abs(z) < 3.5 && r < 119 || z > -3 && Math.abs(r - 26) < 2.6);
 }
 
-// the crypt inside the dais, under the sarcophagus
+// the room inside the dais, under the sarcophagus, and its corridor out to the doorway
 function inCrypt() {
   const { x, z } = player.pos;
-  return player.feet > 13.5 && player.feet < 17 && Math.abs(x) < 6.7 && z > -7.5 && z < 6.7;
+  return player.feet > 13.5 && player.feet < 17 && (Math.abs(x) < 3.6 && Math.abs(z) < 3.6 || Math.abs(x) < 1.3 && z > 0 && z < 15.4);
 }
 
 // what is underfoot, from the plan: paving and stairs, the gravel walks, or the meadow
@@ -204,7 +204,7 @@ function inSphere() { return player.pos.distanceTo(CENTER) < 67 && !underground(
 
 function placeLabel(feet) {
   const r = Math.hypot(player.pos.x, player.pos.z);
-  if (inCrypt()) return { name: 'The crypt', note: 'Beneath the sarcophagus: a doorway out of each side' };
+  if (inCrypt()) return { name: 'Beneath the sarcophagus', note: 'The two stairs meet here; the doorway leads out into the sphere' };
   if (inSphere()) return PLACES[3];
   if (underground()) return PLACES[2];
   if (feet > 60) return PLACES[6];
@@ -301,8 +301,6 @@ function tick(dt) {
   world.sky.material.uniforms.time.value = time;
   world.fire.update(dt, time, camera);
   world.visitors.update(dt);
-  const nearCrypt = inCrypt() || (underground() && player.pos.z < 0 && Math.abs(player.pos.x) < 8);
-  for (const l of world.lampLight) { l.visible = nearCrypt; l.intensity = 6 * (0.9 + 0.1 * Math.sin(time * 13 + l.position.x)); }   // on only where they can be seen
 
   lodClock += dt;
   const moved = lodAt.distanceTo({ x: p.x, y: p.z });
@@ -409,9 +407,6 @@ async function start() {
   world.trees.updateLOD(player.pos.x, player.pos.z, 45); lodAt.set(player.pos.x, player.pos.z);
   world.fire.update(0.016, 0, camera);
   renderer.shadowMap.needsUpdate = true;
-  for (const l of world.lampLight) l.visible = true;   // every shader both with the crypt's lamps and without, so neither stutters later
-  renderer.compile(world.scene, camera);
-  for (const l of world.lampLight) l.visible = false;
   renderer.compile(world.scene, camera);
   updateCamera(0.016);
   renderer.render(world.scene, camera);

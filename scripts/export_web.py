@@ -52,41 +52,39 @@ for s_ in (-1, 1):
     cols.append(ramp_mesh(f"COL_cornice_guide_{'L' if s_ < 0 else 'R'}",
                           [[(s_ * 30, -76.0, 49), (s_ * 10.3, -84.6, 49), (s_ * 10.3, -84.6, 67), (s_ * 30, -76.0, 67)]]))
 
-# the dais in the sphere: a slope over its step nosings on each face, open where the doorways are,
-# and the walls of the crypt and the doorways, since the steps themselves are not walked on
+# the dais in the sphere: a slope over its step nosings on each face, open at the doorway in the
+# front, and the walls of the room under the tomb and its corridor out, since the steps themselves
+# are not walked on
 z0, z1, n_ = D["floor_top"], D["mound_top"], D["dais_steps"]
 b_, t_ = D["dais_base_half"], D["dais_top_half"]
 tread, rise_ = (b_ - t_) / n_, (z1 - z0) / n_
 foot, head = b_ + tread, t_ + tread                       # the slope through the nosings, run down to the floor
 dw, dh = 1.2, 2.9
-hd = foot - dh * tread / rise_                            # where the slope clears the top of a doorway
+hd = foot - dh * tread / rise_                            # where the slope clears the top of the doorway
 zd = z0 + dh
 spin = lambda q, a: [(x * math.cos(a) - y * math.sin(a), x * math.sin(a) + y * math.cos(a), z) for x, y, z in q]
-quads = [[(-head, -head, z1), (head, -head, z1), (head, head, z1), (-head, head, z1)]]
-walls = []
-for a in range(4):
-    r_ = a * math.pi / 2
-    quads += [spin(q, r_) for q in (
-        [(-foot, -foot, z0), (-dw, -foot, z0), (-dw, -hd, zd), (-hd, -hd, zd)],
-        [(dw, -foot, z0), (foot, -foot, z0), (hd, -hd, zd), (dw, -hd, zd)],
-        [(-hd, -hd, zd), (hd, -hd, zd), (head, -head, z1), (-head, -head, z1)])]
-    walls += [spin(q, r_) for q in (
-        [(s_ * dw, -foot, z0), (s_ * dw, -6.6, z0), (s_ * dw, -6.6, zd), (s_ * dw, -foot, zd)] for s_ in (-1, 1))]
-ct = z0 + 3.4
-for x0_, y0_, x1_, y1_ in ((-6.6, -6.6, -dw, -6.6), (dw, -6.6, 6.6, -6.6), (-6.6, 7.4, -dw, 7.4), (dw, 7.4, 6.6, 7.4),
-                           (-6.6, -6.6, -6.6, -dw), (-6.6, dw, -6.6, 7.4), (6.6, -6.6, 6.6, -dw), (6.6, dw, 6.6, 7.4)):
+quads = [[(-head, -head, z1), (head, -head, z1), (head, head, z1), (-head, head, z1)],
+         [(-foot, -foot, z0), (-dw, -foot, z0), (-dw, -hd, zd), (-hd, -hd, zd)],                 # the front face, round its doorway
+         [(dw, -foot, z0), (foot, -foot, z0), (hd, -hd, zd), (dw, -hd, zd)],
+         [(-hd, -hd, zd), (hd, -hd, zd), (head, -head, z1), (-head, -head, z1)]]
+for a in (1, 2, 3):
+    quads.append(spin([(-foot, -foot, z0), (foot, -foot, z0), (head, -head, z1), (-head, -head, z1)], a * math.pi / 2))
+C, ct = B.CHAMBER, z0 + B.CHAMBER_H
+w_ = D["passage_half_w"]
+walls = [[(s_ * dw, -foot, z0), (s_ * dw, -C, z0), (s_ * dw, -C, zd), (s_ * dw, -foot, zd)] for s_ in (-1, 1)]   # the corridor
+for x0_, y0_, x1_, y1_ in ((-C, -C, -dw, -C), (dw, -C, C, -C), (-C, C, C, C),                                  # front, round the corridor, and back
+                           (-C, -C, -C, -w_), (-C, w_, -C, C), (C, -C, C, -w_), (C, w_, C, C)):              # the sides, round the stairs
     walls.append([(x0_, y0_, z0), (x1_, y1_, z0), (x1_, y1_, ct), (x0_, y0_, ct)])
 cols.append(ramp_mesh("COL_dais", quads))
 cols.append(ramp_mesh("COL_crypt_walls", walls))
 
-# the two flights up into the crypt: a slope along their nosings, from the landing to the crypt floor
+# the two flights up under the dais: a slope along their nosings, from the level passage to the room
 pz, ft = D["passage_z"], D["floor_top"]
-n_s = int(round((ft - pz) / 0.21)); run_ = (B.STAIR_FOOT - B.STAIR_HEAD) / n_s
+n_s = int(round((ft - pz) / 0.2)); run_ = (B.RISE_FOOT - B.RISE_HEAD) / n_s
 fl = []
 for s_ in (-1, 1):
-    x0_, x1_ = s_ * B.FLANK_X - B.FLANK_W, s_ * B.FLANK_X + B.FLANK_W
-    fl += [[(x0_, B.STAIR_FOOT + run_, pz), (x1_, B.STAIR_FOOT + run_, pz), (x1_, B.STAIR_HEAD + run_, ft), (x0_, B.STAIR_HEAD + run_, ft)],
-           [(x0_, B.STAIR_HEAD + run_, ft), (x1_, B.STAIR_HEAD + run_, ft), (x1_, B.STAIR_HEAD - 0.6, ft), (x0_, B.STAIR_HEAD - 0.6, ft)]]
+    a_, b2, c_ = s_ * (B.RISE_FOOT + run_), s_ * (B.RISE_HEAD + run_), s_ * (B.CHAMBER - 0.6)
+    fl += [[(a_, -w_, pz), (a_, w_, pz), (b2, w_, ft), (b2, -w_, ft)], [(b2, -w_, ft), (b2, w_, ft), (c_, w_, ft), (c_, -w_, ft)]]
 cols.append(ramp_mesh("COL_crypt_stairs", fl))
 
 # what the page draws

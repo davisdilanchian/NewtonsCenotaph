@@ -111,16 +111,17 @@ function stoneUVs(source, tile, sphere) {
 }
 
 /**
- * The passage a face lies in, if any, as the line its courses run along: the front passage with its
- * landing and the two stairs behind the centre, or the east-west passage. Walls and vaults then take
- * courses that run along that line and climb straight over the vault, so no joint breaks between faces.
+ * The passage a face lies in, if any, as the line its courses run along: the front passage, the
+ * curved one that carries it round, or the east-west one that climbs under the dais. Walls and
+ * vaults then take courses that run along that line and climb straight over the vault, so no joint
+ * breaks between faces.
  */
+const RING_R = 26;
 function passageAxis(x, y, z, n) {
-  if (y > 13.9) return null;                                                        // the crypt, and the sphere's floor and all above it
-  const ax = Math.abs(x);
-  if (z < -13.6 && z > -18.6 && ax < 7) return { along: 'x', at: -16.2 };          // the landing behind the centre
-  if (ax > 3.1 && ax < 6.1 && z > -16 && z < -1) return { along: 'z', at: Math.sign(x) * 4.6 };   // the stairs up into the crypt
-  if (ax < 7.3 && z > -18.6 && z < 112 && (z < 95 || Math.abs(n.z) < 0.7)) return { along: 'z', at: 0 };
+  if (y > 13.9) return null;                                                        // the room under the tomb, and the sphere's floor and all above it
+  const ax = Math.abs(x), r = Math.hypot(x, z);
+  if (z > -3 && Math.abs(r - RING_R) < 3 && !(ax < 3 && z > RING_R)) return { ring: true };
+  if (ax < 7.3 && z > 23 && z < 112 && (z < 95 || Math.abs(n.z) < 0.7)) return { along: 'z', at: 0 };
   if (Math.abs(z) < 3.6 && ax < 125 && (ax < 115 || Math.abs(n.x) < 0.7)) return { along: 'x', at: 0 };
   return null;
 }
@@ -138,7 +139,8 @@ function splitPassages(g, tile) {
     if (n.y > 0.65) { out.floor.push(i); continue; }
     out.wall.push(i);
     for (const v of [a, b, c]) {
-      const along = axis.along === 'z' ? v.z : v.x, across = (axis.along === 'z' ? v.x : v.z) - axis.at;
+      const along = axis.ring ? Math.atan2(v.x, v.z) * RING_R : axis.along === 'z' ? v.z : v.x;
+      const across = axis.ring ? Math.hypot(v.x, v.z) - RING_R : (axis.along === 'z' ? v.x : v.z) - axis.at;
       wallUV.push(along / tile, (v.y + Math.abs(across)) / tile);      // up the wall, then on over the vault
     }
   }
@@ -647,7 +649,8 @@ function makeFire() {
 
 // How much light a visitor stands in: full daylight outside, little in the passages, less in the void.
 function lightAt(x, y, z) {
-  if (y < 13.9 && (Math.abs(x) < 7.3 && z > -18.6 && z < 100 || Math.abs(z) < 3.6 && Math.abs(x) < 112)) return 0.3;
+  if (y < 13.9 && (Math.abs(x) < 7.3 && z > 23 && z < 100 || Math.abs(z) < 3.6 && Math.abs(x) < 112 || z > -3 && Math.abs(Math.hypot(x, z) - RING_R) < 3)) return 0.3;
+  if (y < 17.5 && Math.abs(x) < 3.6 && z > -3.6 && z < 16) return 0.3;                // the room under the tomb and its way out
   return Math.hypot(x, y - CENTER.y, z) < 67 ? 0.16 : 1;
 }
 
@@ -659,9 +662,12 @@ function floorBelow(bvh, x, y, z, ray = new THREE.Ray()) {
   return hit ? hit.point.y : y - 1;
 }
 
-// Tourists' way in: up from the esplanade, through the arch and the passage to the landing behind the
-// centre, up the stair into the crypt, and out of its front door into the sphere.
-const ROUTE = [[0, 206], [0, 160], [0, 126], [0, 112], [0, 96], [0, -15.6], [4.6, -15.6], [4.6, -1.2], [0, 1.5], [0, 17], [7, 23], [15, 21]];
+// Tourists' way in: up from the esplanade, through the arch and along the passage, round the curved
+// passage to the east one, up the stair under the dais to the room beneath the tomb, and out of its
+// doorway into the sphere.
+const ROUTE = [[0, 206], [0, 160], [0, 126], [0, 112], [0, 96],
+  ...Array.from({ length: 10 }, (_, k) => [RING_R * Math.sin((Math.PI / 2) * k / 9), RING_R * Math.cos((Math.PI / 2) * k / 9)]),
+  [18.5, 0], [3.2, 0], [0, 1.5], [0, 17], [7, 23], [15, 21]];
 
 function makeVisitors(scene, sheet, places, bvh) {
   const r = rng(5), ray = new THREE.Ray(), spots = [[-8, 5.5, 132, 5], [9, 5.5, 136, 3], [-6, 5.5, 112, 4], [11, 5.5, 116, 3], [-14, 46.5, 96, 4], [10, 46.5, 98, 3],
@@ -769,8 +775,9 @@ export async function loadWorld(renderer, onProgress) {
         const c = g.attributes.color, pos = g.attributes.position, baked = new Float32Array(c.count * 3);
         for (let v = 0; v < c.count; v++) {
           const x = pos.getX(v), y = pos.getY(v), z = pos.getZ(v);
-          const inFront = Math.abs(x) < 7.3 && z > -18.6 && z < 110, inSide = Math.abs(z) < 3.5 && Math.abs(x) < 125;
-          const depth = y < 14.1 ? (inFront ? 108 - z : inSide ? 121 - Math.abs(x) : 0) : 0, k = 1 + (PASSAGES - 1) * smooth(0, 14, depth);
+          const inFront = Math.abs(x) < 7.3 && z > 23 && z < 110, inSide = Math.abs(z) < 3.5 && Math.abs(x) < 125;
+          const inRing = z > -3 && Math.abs(Math.hypot(x, z) - RING_R) < 3;
+          const depth = y < 14.1 ? (inFront ? 108 - z : inSide ? 121 - Math.abs(x) : inRing ? 30 : 0) : 0, k = 1 + (PASSAGES - 1) * smooth(0, 14, depth);
           const least = name === 'Basin coping' ? 0.55 : 0;   // its sides meet the ground, where the bake's vertices went dark
           baked[v * 3] = Math.max(c.getX(v) * k, least); baked[v * 3 + 1] = Math.max(c.getY(v) * k, least); baked[v * 3 + 2] = Math.max(c.getZ(v) * k, least);
         }
@@ -819,20 +826,8 @@ export async function loadWorld(renderer, onProgress) {
   const fire = makeFire();
   scene.add(fire.group);
   const visitors = makeVisitors(scene, figureSheet, figurePlaces, bvh);
-  // the baked lamps line the passages; the stairs up into the crypt and the crypt itself have lamps
-  // of their own, lit live, since the bake doesn't reach them
-  const LIVE = [[5.5, 12.2, -8.5], [-5.5, 12.2, -8.5], [3.6, 16.4, 6.3], [-3.6, 16.4, 6.3]];
-  const baked = new Float32Array(lampBuf, 4, new Uint32Array(lampBuf, 0, 1)[0] * 3), all = new ArrayBuffer(4 + (baked.length + LIVE.length * 3) * 4);
-  new Uint32Array(all, 0, 1)[0] = baked.length / 3 + LIVE.length;
-  new Float32Array(all, 4).set([...baked, ...LIVE.flat()]);
-  const lamps = makeLamps(all);
-  scene.add(lamps, makeSconces(all, bvh));
-  const lampLight = LIVE.map(([x, y, z]) => {
-    const l = new THREE.PointLight(0xffb070, 0, 13, 2);
-    l.position.set(x * 0.9, y + 0.2, z * 0.97);
-    scene.add(l);
-    return l;
-  });
+  const lamps = makeLamps(lampBuf);
+  scene.add(lamps, makeSconces(lampBuf, bvh));
 
 
   // The sun is the only light here. Outdoors its shadow map covers the whole site; underground and
@@ -885,6 +880,6 @@ export async function loadWorld(renderer, onProgress) {
   shafts.mesh.visible = false;
   scene.add(shafts.mesh);
 
-  return { scene, bvh, trees, water, sky, fire, visitors, lampLight, sun, setSun, refresh, shadowsClose, lamps, shafts, tomb, sunStrength: () => sunStrength };
+  return { scene, bvh, trees, water, sky, fire, visitors, sun, setSun, refresh, shadowsClose, lamps, shafts, tomb, sunStrength: () => sunStrength };
 
 }
