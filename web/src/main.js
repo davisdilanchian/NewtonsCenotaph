@@ -400,9 +400,6 @@ async function start() {
   player = new Player({ bvh: world.bvh, groundHeight, treeHash: world.trees.hash });
   bindControls();
 
-  $('about').innerHTML = SCALE === 1
-    ? 'You stand here at true eye height against the 150 m sphere. Screens make large things look small, so it feels smaller than it would in person. <a href="./">Use the corrected camera</a>.'
-    : 'Screens make large things look small, so the camera here stands lower and moves slower to give back the sense of size. <a href="?scale=1">See it at true eye height</a>.';
   arrive(PLACES[0]);
   world.trees.updateLOD(player.pos.x, player.pos.z, 45); lodAt.set(player.pos.x, player.pos.z);
   world.fire.update(0.016, 0, camera);
