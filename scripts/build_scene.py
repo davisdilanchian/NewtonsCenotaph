@@ -225,15 +225,26 @@ def bore_target(d):
     the tomb the sky shows through every star."""
     return Vector((0, 0, D["tomb_focus"]))
 
+def bore_mouth(r):
+    """Radius of a bore where it leaves the sphere: a pinhole, so the stone reads whole from outside.
+    Must match outerRadius in web/tools/taper_bores.mjs, which made the same cut in the page's mesh."""
+    return max(0.035, 0.28 * r)
+
 def hole_cutter():
-    """Long straight bores through the 8 m shell, all aimed at the sarcophagus."""
+    """Cones through the 8 m shell, all aimed at the sarcophagus: as wide as ever where they open
+    into the void, narrowing to a pinhole on the outside."""
     bm = bmesh.new()
     for d, r in star_holes():
         q = Vector((0, 0, D["sphere_cz"])) + d * D["shell_inner_R"]
         axis = (q - bore_target(d)).normalized()
         t = axis.orthogonal().normalized(); u = axis.cross(t)
-        rings = [[bm.verts.new(q + axis * h + (t * math.cos(a) + u * math.sin(a)) * rad) for a in (2 * math.pi * k / 12 for k in range(12))]
-                 for h, rad in ((-1.5, bore_flare(r) * 1.04), (14.0, r))]
+        b_ = (d * D["shell_inner_R"]).dot(axis)
+        h_out = -b_ + math.sqrt(b_ * b_ + D["sphere_R"] ** 2 - D["shell_inner_R"] ** 2)   # where the axis leaves the sphere
+        wide = bore_flare(r) * 1.04
+        w0 = wide + (r - wide) * 1.5 / 15.5               # the radius at the vault, as the straight bores had it
+        slope = (bore_mouth(r) - w0) / h_out
+        rings = [[bm.verts.new(q + axis * h + (t * math.cos(a) + u * math.sin(a)) * max(w0 + slope * h, 0.004)) for a in (2 * math.pi * k / 12 for k in range(12))]
+                 for h in (-1.5, h_out + 0.5)]
         bm.faces.new(rings[0]); bm.faces.new(list(reversed(rings[-1])))
         for i in range(12):
             j = (i + 1) % 12

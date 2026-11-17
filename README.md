@@ -24,7 +24,8 @@ On a phone, turn to look and walk for real to move: the page feels each step and
 | `scripts/make_web_textures.py` | Generates the page's tiling stone, ground and foliage textures |
 | `web/public/assets/constellations.json` | The painted figures on the vault, made by `web/tools/birth_sky.mjs` |
 | `web/public/assets/music/` | The page's music (see Sound) |
-| `web/public/assets/figures.webp` | The paper visitors, cut from engraved plates by `web/tools/figures/` |
+| `web/public/assets/figures.webp` | The paper visitors, cut from engraved plates by `web/tools/figures/` (`recut.py` is the last pass: it trims away the ground and paper the first cut left) |
+| `web/tools/taper_bores.mjs` | Narrows the vault's bores to pinholes on the outside in the page's `monument.glb`; `scripts/build_scene.py` cuts the same cones on a rebuild |
 | `web/` | The walkable page. `.github/workflows/pages.yml` builds and deploys it on every push to `web/` |
 | `docs/dimensions.json` | The dimensions and tree counts the last build used |
 
@@ -70,7 +71,7 @@ Origin is the sphere's axis at natural ground. The front (main stair, tunnel) fa
 | Front stair block | solid block against the upper tier, 79 m wide at the bridge, 21 m at the top, 21 m deep, with a flight of 292 risers of 0.06 units on each side and the small door at its foot |
 | Passages | 3.9 units high and 4.4 wide, level with the terrace, from the arch in the cylinder and from the east and west sides of the drum, each about 100 units long |
 | Floor | a raised floor at 14 units, with a square stepped dais to 18.6 units under the sarcophagus: 30 units across at its foot, 15 at its top, in 20 steps. All three passages climb inside it to a room under the sarcophagus, which opens through a doorway in its back face |
-| Vault openings | the sky over Woolsthorpe at Newton's birth: each star above the horizon is a long straight bore cut by boolean through the shell, sized by its brightness, aimed at the sarcophagus |
+| Vault openings | the sky over Woolsthorpe at Newton's birth: each star above the horizon is a cone cut by boolean through the shell, aimed at the sarcophagus: sized by its brightness where it opens into the void, and narrowing to a pinhole of 7 to 24 cm (the Moon 67 cm) on the outside, so the sphere reads as whole stone from the terraces. The page's mesh has the cones; `model/` and `renders/` are from before them and still show the wider straight bores until the next Blender rebuild |
 
 ## The cypresses
 
@@ -114,7 +115,7 @@ If you want a concrete version, swap the `Limestone ashlar` and `Limestone dress
 - The inscription is my wording, after Newton's tomb in Westminster Abbey, which names him ISAACVS NEWTON and calls him HVMANI GENERIS DECVS: ISAACVS NEWTON / QVI NATVRAE LEGES PATEFECIT / HVMANI GENERIS DECVS. The sheet shows only faint lines there.
 - The oil lamps in the passages, in pairs facing across on iron sconces, are my addition: without them the middle of a passage is pitch dark. They are kept dim, so the eye has adjusted to the dark by the time it reaches the void.
 - The drawings show the lions only as small dark shapes, so their pose and modelling are my reading. The brazier and small portal are simplified stand-ins.
-- The visitors are paper cut-outs of Parisians from Boullée's own years, cut from the engraved plates of the *Galerie des Modes et Costumes Français* (1778–1787) and printed in one ink. They turn to face you, like figures cut from a print and propped up. They are there for scale, not as a claim about who would have come. Some stand about; others walk in from the esplanade, through the passage and up into the sphere, and back out again.
+- The visitors are paper cut-outs of Parisians from Boullée's own years, cut from the engraved plates of the *Galerie des Modes et Costumes Français* (1778–1787) and printed in one ink. They turn to face you, like figures cut from a print and propped up, and move like paper puppets: rocking from foot to foot, the sheet flipping over to face the way they go. They are there for scale, not as a claim about who would have come. Each goes its own way (see `web/src/visitors.js`): it picks somewhere nearby to go, along the basin, up the stair, round the terraces, through the passages into the sphere and up the dais, walks there keeping to the right and stepping round whoever is in the way, stops to look, falls into talk with whoever is standing there, and moves on. Some come in pairs and keep together. They bow when you come up to them and stand aside to let you by. The sun throws each one's outline on the ground.
 - The interior galleries shown in the section, inside the drum, are not modelled. The drum is solid.
 - Seen from a few metres away, the cypress foliage looks lumpy. It reads well from the normal viewing distances.
 - The landscape (meadow, hills, woodland, basin, allée) is invented scenery.
@@ -124,10 +125,12 @@ If you want a concrete version, swap the `Limestone ashlar` and `Limestone dress
 Nothing inside is painted on. The sun moves across the sky, and everything it does comes from the geometry:
 
 - **Sun:** one light with a shadow map outdoors and in the passages.
-- **Columns inside:** an 8 m bore is a light pipe, not a pinhole. Light can only leave along its axis, so each column stays fixed and all of them meet on the sarcophagus. Only their strength changes: the sky keeps each faintly lit, and sunlight adds to it as the sun nears the bore's line, losing a share at every bounce off the wall. See `web/src/sunshafts.js`. The columns are drawn with the exact length of the view ray inside them.
+- **Columns inside:** each bore is aimed at the sarcophagus, so its column stays fixed and all of them meet there. Only their strength changes: the sky keeps each faintly lit, and sunlight adds to it as the sun nears the bore's line, losing a share at every bounce off the wall. See `web/src/sunshafts.js`. The columns are drawn with the exact length of the view ray inside them.
 - **Sky light inside the sphere:** the form factor from every bore to every vertex, plus the exact interreflection for a closed sphere. With the vault painted black, almost all of that bounce comes off the floor and the tomb.
 - **Sky light and bounce elsewhere:** path traced in Cycles into the vertices by `scripts/export_web.py`, along with the passage lamps. The bounce is baked from a midday sun, so it doesn't move with the sun.
-- **Nothing pops in:** the columns and pinholes fade up over a second and a half as you arrive, the sun's shadows follow it every half second in steps too small to see, and each tree hands over from one detail level to the next across a band of distance in a fine dither, never in one frame.
+- **Nothing pops in:** the columns and pinholes fade up over a second and a half as you arrive, the sun's shadows follow it every second in steps too small to see, and each tree hands over from one detail level to the next across a band of distance in a fine dither, never in one frame.
+- **The picture:** the scene is drawn into a floating-point image, so a flame, a star or the sky can be brighter than white, and that brightness spreads a little into what is round it. One last pass sets the exposure, darkens the corners slightly and adds a grain finer than a grey level, which keeps the dark vault from banding. See `web/src/post.js`.
+- **Keeping it quick:** only the cypresses in view are drawn, in four levels of detail, and their shadows come from one coarse copy of each. On a slow machine the page gives up sharpness beyond a screen pixel first, then the spread of light, then resolution. Phones use smaller shadow and reflection images and fewer of the finest trees.
 - **Exposure:** one fixed value everywhere, so nothing changes as you cross a threshold. The interior and passages are set to the level the eye would settle at, a fixed multiple of the computed light.
 
 ## Sound

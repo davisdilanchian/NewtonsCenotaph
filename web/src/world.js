@@ -5,10 +5,10 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { Reflector } from './mirror.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
 import { noise3, rng, smooth, SCALE } from './util.js';
-import { makeCutouts } from './figures.js';
+import { makeVisitors } from './visitors.js';
 import { makeSunshafts } from './sunshafts.js';
 
 export const CENTER = new THREE.Vector3(0, 73.5, 0);        // sphere centre
@@ -41,8 +41,8 @@ function load(name, srgb, renderer, manager) {
   return t;
 }
 
+const SMALL = matchMedia('(pointer: coarse)').matches;   // a phone or tablet: smaller shadow and reflection images
 const SKY_LEVEL = { value: 1 };                 // follows the height of the sun
-const FIGURE_LIGHT = { value: 1 };              // the paper visitors, lit like the stone around them
 
 /** Weather that repeats nowhere: broad tonal drift, rain streaks, and the sphere's stone courses. */
 function weathered(mat, { streaks = 1, courses = false, level = 1 } = {}) {
@@ -180,6 +180,7 @@ function splitPassages(g, tile) {
  */
 // One exposure serves the whole site, so the dark interior is set permanently to where the eye would
 // settle in it, rather than changing the camera as you cross a threshold.
+const SKY_FILL = 2.1;                        // how much stronger the sky's light in the open is than the bake has it
 const INDOORS = 1000, PASSAGES = 5;      // the passages stay dim, so the eye has adjusted by the time it reaches the void
 
 // The vault is painted black, so almost all the light that bounces round the void comes off the floor
@@ -289,15 +290,15 @@ function makeTrees(buffer, foliage, scene) {
   const trunks = new THREE.InstancedMesh(trunkGeo, bark, nTrees);
   // Each detail level hands over to the next across a band of distance, its pixels thinning out in a
   // fine dither as the next one's fill in, measured from the eye every frame, so no tree ever swaps.
-  const bands = { value: new THREE.Vector4() }, BLEND = [3, 10];
-  const levels = [0, 1, 2].map((lod) => {
+  const bands = { value: new THREE.Vector4() }, farBand = { value: new THREE.Vector2() }, BLEND = [3, 10, 40], FAR = 300;
+  const levels = [0, 1, 2, 3].map((lod) => {
     const m = foliage.clone();
     m.defines = { LOD: lod };
     m.onBeforeCompile = (s) => {
-      s.uniforms.bands = bands;
+      s.uniforms.bands = bands; s.uniforms.farBand = farBand;
       s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vTreeAt;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTreeAt = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xz;');
-      s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec4 bands; varying vec2 vTreeAt;')
+      s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec4 bands; uniform vec2 farBand; varying vec2 vTreeAt;')
         // close up, where the crown turns away from the eye its edge breaks into tufts, not a smooth hard outline
         .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
           #if LOD == 0
@@ -313,56 +314,104 @@ function makeTrees(buffer, foliage, scene) {
           #elif LOD == 1
             if (n < a || n >= b) discard;
           #else
-            if (n < b) discard;
+            float c = 1.0 - smoothstep(farBand.x, farBand.y, d);
+            #if LOD == 2
+              if (n < b || n >= c) discard;
+            #else
+              if (n < c) discard;
+            #endif
           #endif`);
     };
     return m;
   });
   const sets = [];
   for (let v = 0; v < VARIANTS; v++) {
-    sets.push([[170, 5, 4], [46, 4, 3], [18, 3, 2]].map(([sprays, sides, rings], lod) => {
+    sets.push([[170, 5, 4], [46, 4, 3], [18, 3, 2], [8, 3, 2]].map(([sprays, sides, rings], lod) => {
       const mesh = new THREE.InstancedMesh(cypressTree(sprays, sides, rings, v * 9.1, heights[v]), levels[lod], nTrees);
-      mesh.frustumCulled = false; mesh.receiveShadow = mesh.castShadow = true; mesh.count = 0;
+      mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.count = 0;
       scene.add(mesh);
       return mesh;
     }));
   }
+  const mats = new Float32Array(nTrees * 16), tints = new Float32Array(nTrees * 3);
   for (let i = 0; i < nTrees; i++) {
     const o = i * 6, t = { x: data[o], y: data[o + 1], z: data[o + 2], r: 1.35, v: i % VARIANTS };   // crowns nearly touch: the rows are hedges
     p.set(t.x, t.y, t.z); q.setFromAxisAngle(yAxis, data[o + 3]); s.set(data[o + 4], data[o + 5], data[o + 4]);
-    t.matrix = m.compose(p, q, s).clone();
-    tint.setHSL(0.3 + r() * 0.03, 0.5 + r() * 0.12, 0.3 + r() * 0.08);
-    t.color = tint.clone();
-    trunks.setMatrixAt(i, t.matrix);
+    m.compose(p, q, s).toArray(mats, i * 16);
+    tint.setHSL(0.3 + r() * 0.03, 0.5 + r() * 0.12, 0.3 + r() * 0.08).toArray(tints, i * 3);
+    t.mid = t.y + 5.4 * data[o + 5];
+    trunks.setMatrixAt(i, m);
     trees.push(t); hash.add(t);
   }
-  trunks.castShadow = true; trunks.frustumCulled = false;
+  trunks.frustumCulled = false;
   scene.add(trunks);
-
-  // three detail levels of the same tree, by distance from the walker. A tree near a band belongs to
-  // both levels, with room to spare for the walker moving on before the next update.
-  function updateLOD(x, z, nearDist, spare = 5) {
-    const near = nearDist, far = 3 * nearDist, counts = sets.map(() => [0, 0, 0]);
-    bands.value.set(near - BLEND[0], near + BLEND[0], far - BLEND[1], far + BLEND[1]);
-    const put = (t, lod) => { const k = counts[t.v][lod]++, mesh = sets[t.v][lod]; mesh.setMatrixAt(k, t.matrix); mesh.setColorAt(k, t.color); };
-    for (const t of trees) {
-      const d = Math.hypot(t.x - x, t.z - z);
-      if (d < near + BLEND[0] + spare) put(t, 0);
-      if (d > near - BLEND[0] - spare && d < far + BLEND[1] + spare) put(t, 1);
-      if (d > far - BLEND[1] - spare) put(t, 2);
-    }
-    sets.forEach((lods, v) => lods.forEach((mesh, l) => {
-      mesh.count = counts[v][l];
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    }));
+  for (const lods of sets) for (const mesh of lods) {
+    mesh.castShadow = false;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(nTrees * 3), 3).setUsage(THREE.DynamicDrawUsage);
   }
 
+  // Shadows come from one plain copy of every tree at its coarsest, drawn only into the sun's shadow
+  // map on the frames that map is redrawn: the trees on screen can then be only the ones in view.
+  const unseen = new THREE.ShaderMaterial({ vertexShader: 'void main(){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); }', fragmentShader: 'void main(){ gl_FragColor = vec4(0.0); }', colorWrite: false, depthWrite: false, depthTest: false });
+  const casters = sets.map((lods, v) => {
+    const mesh = new THREE.InstancedMesh(lods[2].geometry, unseen, nTrees);
+    let k = 0;
+    for (let i = v; i < nTrees; i += VARIANTS) mesh.instanceMatrix.array.set(mats.subarray(i * 16, i * 16 + 16), 16 * k++);
+    mesh.count = k; mesh.castShadow = true; mesh.frustumCulled = false; mesh.visible = false;
+    scene.add(mesh);
+    return mesh;
+  });
+
+  // Four detail levels of the same tree, by distance from the walker, and only the trees the eye can
+  // see: those in its field of view, and beside the basin those whose reflection is. A tree near a
+  // band belongs to both levels, and the dither shares it between them.
+  const TREE_R = 6.6, WATER = 0.12, at = new THREE.Vector3(), last = new Float32Array(9).fill(1e9);
+  function update(camera, x, z, nearDist, under) {
+    const e = camera.matrixWorldInverse.elements, w = camera.matrixWorld.elements;
+    let same = last[7] === nearDist && last[8] === (under ? 1 : 0);
+    for (let k = 0; k < 7; k++) { const v = k < 3 ? w[12 + k] : k < 6 ? w[8 + k - 3] : camera.fov; if (Math.abs(last[k] - v) > 1e-5) same = false; last[k] = v; }
+    if (same) return;
+    last[7] = nearDist; last[8] = under ? 1 : 0;
+    const near = nearDist, far = 3 * nearDist, counts = sets.map(() => [0, 0, 0, 0]);
+    bands.value.set(near - BLEND[0], near + BLEND[0], far - BLEND[1], far + BLEND[1]);
+    farBand.value.set(FAR - BLEND[2], FAR + BLEND[2]);
+    const ty = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2 + 3)), tx = ty * camera.aspect, sy = Math.hypot(1, ty), sx = Math.hypot(1, tx);
+    const inView = (px, py, pz) => {
+      const vx = e[0] * px + e[4] * py + e[8] * pz + e[12], vy = e[1] * px + e[5] * py + e[9] * pz + e[13], d = -(e[2] * px + e[6] * py + e[10] * pz + e[14]);
+      return d > -TREE_R && Math.abs(vx) < d * tx + TREE_R * sx && Math.abs(vy) < d * ty + TREE_R * sy;
+    };
+    const put = (i, v, lod) => {
+      const k = counts[v][lod]++, mesh = sets[v][lod], ma = mesh.instanceMatrix.array, ca = mesh.instanceColor.array;
+      for (let j = 0; j < 16; j++) ma[k * 16 + j] = mats[i * 16 + j];
+      ca[k * 3] = tints[i * 3]; ca[k * 3 + 1] = tints[i * 3 + 1]; ca[k * 3 + 2] = tints[i * 3 + 2];
+    };
+    for (let i = 0; i < nTrees; i++) {
+      const t = trees[i];
+      if (under && !(Math.abs(t.x) < 70 && t.z > 110 || Math.abs(t.z) < 60 && Math.abs(t.x) > 100)) continue;   // from a passage, only what its mouth can show
+      if (!inView(t.x, t.mid, t.z) && !(t.z > 200 && Math.abs(t.x) < 60 && inView(t.x, 2 * WATER - t.mid, t.z))) continue;
+      const d = Math.hypot(t.x - x, t.z - z);
+      if (d < near + BLEND[0]) put(i, t.v, 0);
+      if (d > near - BLEND[0] && d < far + BLEND[1]) put(i, t.v, 1);
+      if (d > far - BLEND[1] && d < FAR + BLEND[2]) put(i, t.v, 2);
+      if (d > FAR - BLEND[2]) put(i, t.v, 3);
+    }
+    let drawn = 0;
+    sets.forEach((lods, v) => lods.forEach((mesh, l) => {
+      const n = mesh.count = counts[v][l];
+      drawn += n;
+      for (const a of [mesh.instanceMatrix, mesh.instanceColor]) { a.clearUpdateRanges(); a.addUpdateRange(0, n * a.itemSize); a.needsUpdate = true; }
+    }));
+    return drawn;
+  }
+  const castShadows = (on) => { for (const mesh of casters) mesh.visible = on; };
+
   // distant broadleaf woods
-  const crown = new THREE.IcosahedronGeometry(1, 2);
+  // seen from a kilometre off, each crown is a few pixels: a lumpy twenty-sided stone is plenty
+  const crown = mergeVertices(new THREE.IcosahedronGeometry(1, 0).deleteAttribute('uv').deleteAttribute('normal'));
   const cp = crown.attributes.position;
   for (let i = 0; i < cp.count; i++) {
-    const x = cp.getX(i), y = cp.getY(i), z = cp.getZ(i), k = 0.8 + 0.5 * noise3(x * 2.1, y * 2.1, z * 2.1);
+    const x = cp.getX(i), y = cp.getY(i), z = cp.getZ(i), k = 0.85 + 0.5 * noise3(x * 2.1, y * 2.1, z * 2.1);
     cp.setXYZ(i, x * k, y * k * 0.9, z * k);
   }
   crown.computeVertexNormals();
@@ -375,7 +424,7 @@ function makeTrees(buffer, foliage, scene) {
   }
   woods.frustumCulled = false;
   scene.add(woods);
-  return { hash, updateLOD, count: nTrees };
+  return { hash, update, castShadows, count: nTrees };
 }
 
 function makeGround(grassMap, grassNormal) {
@@ -392,11 +441,23 @@ function makeGround(grassMap, grassNormal) {
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   g.computeVertexNormals();
   const mat = new THREE.MeshStandardMaterial({ map: grassMap, normalMap: grassNormal, normalScale: new THREE.Vector2(0.5, 0.5), vertexColors: true, roughness: 0.96 });
-  // a second, much larger sampling hides the tiling at a distance
+  // a second, much larger sampling hides the tiling at a distance, and the meadow is no lawn: it
+  // drifts between lush and dry in patches a few strides across and in long sweeps
   mat.onBeforeCompile = (s) => {
-    s.fragmentShader = s.fragmentShader.replace('#include <map_fragment>',
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vField;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvField = position.xz;');
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', `#include <common>
+      varying vec2 vField;
+      float fh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float fn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(fh(i), fh(i + vec2(1, 0)), f.x), mix(fh(i + vec2(0, 1)), fh(i + vec2(1, 1)), f.x), f.y); }
+      float ff(vec2 p) { return 0.5 * fn(p) + 0.3 * fn(p * 2.3 + 5.1) + 0.2 * fn(p * 5.1 + 9.7); }`)
+      .replace('#include <map_fragment>',
       `vec4 g1 = texture2D(map, vMapUv); vec4 g2 = texture2D(map, vMapUv * 0.073 + 0.31);
-       diffuseColor.rgb *= mix(g1.rgb, g2.rgb, 0.55) * 1.0;`);
+       float patches = ff(vField * 0.21), sweeps = ff(vField * 0.011 + 3.0), tufts = fn(vField * 2.6);
+       vec3 turf = mix(g1.rgb, g2.rgb, 0.55) * mix(vec3(0.6, 0.7, 0.5), vec3(1.0, 1.0, 0.86), patches);
+       turf = mix(turf, turf * vec3(1.3, 1.08, 0.62), 0.6 * smoothstep(0.42, 0.72, sweeps));
+       diffuseColor.rgb *= turf * (0.84 + 0.2 * tufts) * vec3(0.8, 0.7, 0.6);`);
   };
   const mesh = new THREE.Mesh(g, mat);
   mesh.receiveShadow = true;
@@ -422,7 +483,7 @@ function makeBasin() {
         #include <colorspace_fragment>
       }`,
   };
-  const water = new Reflector(new THREE.PlaneGeometry(40, 511), { textureWidth: 1024, textureHeight: 1024, clipBias: 0.002, shader, multisample: 0 });
+  const water = new Reflector(new THREE.PlaneGeometry(40, 511), { textureWidth: SMALL ? 512 : 1024, textureHeight: SMALL ? 512 : 1024, clipBias: 0.002, shader, multisample: 0 });
   water.rotation.x = -Math.PI / 2;
   water.position.set(0, 0.12, 462.5);
   return water;
@@ -660,13 +721,6 @@ function makeFire() {
   };
 }
 
-// How much light a visitor stands in: full daylight outside, little in the passages, less in the void.
-function lightAt(x, y, z) {
-  if (y < 13.9 && (Math.abs(x) < 7.3 && z > 2 && z < 100 || Math.abs(z) < 3.6 && Math.abs(x) < 112)) return 0.3;
-  if (y < 17.5 && Math.abs(x) < 3.6 && z > -16 && z < 3.6) return 0.3;                // the room under the tomb and its way out
-  return Math.hypot(x, y - CENTER.y, z) < 67 ? 0.16 : 1;
-}
-
 // The floor under a point, found by looking down from a little above it. Starting just above the
 // last floor keeps the search under a passage's vault rather than on the terrace over it.
 function floorBelow(bvh, x, y, z, ray = new THREE.Ray()) {
@@ -681,55 +735,6 @@ function standOn({ bvh, slopes, treads }, x, y, z, ray) {
   const solid = Math.max(floorBelow(bvh, x, y, z, ray), groundHeight(x, z)), tread = floorBelow(treads, x, y, z, ray);
   if (Math.abs(floorBelow(slopes, x, y, z, ray) - solid) < 1e-3) return tread > solid - 0.8 ? tread : solid;
   return Math.max(solid, tread);
-}
-
-// Tourists' way in: up from the esplanade, through the arch and straight along the passage, up the
-// stair under the dais to the room beneath the tomb, and out of its doorway into the sphere.
-const ROUTE = [[0, 206], [0, 160], [0, 126], [0, 112], [0, 96], [0, 19], [0, 3.2], [0, -1.5], [0, -17], [-7, -23], [-15, -21]];
-
-function makeVisitors(scene, sheet, places, floors) {
-  const r = rng(5), ray = new THREE.Ray(), spots = [[-8, 5.5, 132, 5], [9, 5.5, 136, 3], [-6, 5.5, 112, 4], [11, 5.5, 116, 3], [-14, 46.5, 96, 4], [10, 46.5, 98, 3],
-                             [-17, 0, 178, 4], [15, 0, 188, 3], [-26, 0, 310, 2], [26, 0, 430, 3], [-24, 5.5, 150, 2], [-14, 14, -20, 4], [19, 14, 9, 4], [-9, 14, 21, 3], [21, 14, -13, 3], [4.5, 18.6, 3.5, 2],
-                             [-30, 5.5, 140, 5], [34, 5.5, 128, 4], [0, 0, 198, 6], [6, 64, 73, 3], [-22, 46.5, 92, 3], [24, 0, 640, 3], [-27, 0, 560, 2]];
-  const people = [];
-  for (const [x, y, z, n] of spots) for (let i = 0; i < n; i++) {
-    const px = x + (r() - 0.5) * 4, pz = z + (r() - 0.5) * 4, py = standOn(floors, px, y + 3, pz, ray);   // standing on whatever is there
-    people.push([px, py, pz, lightAt(px, py, pz)]);
-  }
-
-  // the route sampled finely enough to keep feet on each step, each sample on the floor beneath it
-  const GAP = 0.1, path = [];
-  let y = 1;
-  for (let k = 1; k < ROUTE.length; k++) {
-    const [x0, z0] = ROUTE[k - 1], [x1, z1] = ROUTE[k], n = Math.ceil(Math.hypot(x1 - x0, z1 - z0) / GAP);
-    for (let j = k === 1 ? 0 : 1; j <= n; j++) {
-      const x = x0 + (x1 - x0) * j / n, z = z0 + (z1 - z0) * j / n;
-      y = standOn(floors, x, y + 1.2, z, ray);
-      path.push([x, y, z]);
-    }
-  }
-  const WALKERS = 14, first = people.length, walkers = [];
-  for (let i = 0; i < WALKERS; i++) {
-    walkers.push({ s: (i / WALKERS) * path.length * 2, side: (r() - 0.5) * 0.5, speed: (0.85 + r() * 0.3) * 1.3 / SCALE, phase: r() * 6 });
-    people.push([0, 0, 0, 1]);
-  }
-  const cut = makeCutouts(sheet, places, people, { scale: SCALE, rand: r, light: FIGURE_LIGHT });
-  scene.add(...cut.meshes);
-  return {
-    // each walks the route in, turns, and walks it out again, keeping to the right
-    update(dt) {
-      for (const [i, w] of walkers.entries()) {
-        w.s = (w.s + dt * w.speed / GAP) % (path.length * 2);
-        const back = w.s >= path.length, at = back ? path.length * 2 - 1 - w.s : w.s;
-        const k = Math.max(0, Math.min(path.length - 2, Math.floor(at))), f = at - k, p0 = path[k], p1 = path[k + 1];
-        const dx = p1[0] - p0[0], dz = p1[2] - p0[2], l = Math.hypot(dx, dz) || 1, keep = (back ? -1 : 1) * (0.35 + w.side) / SCALE;
-        const x = p0[0] + dx * f - (dz / l) * keep, z = p0[2] + dz * f + (dx / l) * keep;
-        const yy = p0[1] + (p1[1] - p0[1]) * f + Math.abs(Math.sin(w.s * GAP * 12.4 + w.phase)) * 0.025 / SCALE;   // a step's lift
-        cut.move(first + i, x, yy, z, lightAt(x, yy, z));
-      }
-      cut.moved();
-    },
-  };
 }
 
 // ----------------------------------------------------------------------- load
@@ -775,7 +780,7 @@ export async function loadWorld(renderer, onProgress) {
   const root = gltf.scene, solids = [];
   root.updateMatrixWorld(true);
   const nameOf = (o) => { let n = o; while (n.parent && n.parent !== root) n = n.parent; return n.userData.name ?? n.name; };
-  const meshes = [], inside = [], slopes = [], treads = [];
+  const meshes = [], inside = [], slopes = [], treads = [], vaults = [];
   root.traverse((o) => { if (o.isMesh) meshes.push(o); });
   const flat = (mesh) => {
     const g = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
@@ -800,7 +805,9 @@ export async function loadWorld(renderer, onProgress) {
           const inFront = Math.abs(x) < 7.3 && z > 2 && z < 110, inSide = Math.abs(z) < 3.5 && Math.abs(x) < 125;
           const depth = y < 14.1 ? (inFront ? 108 - z : inSide ? 121 - Math.abs(x) : 0) : 0, k = 1 + (PASSAGES - 1) * smooth(0, 14, depth);
           const least = name === 'Basin coping' ? 0.55 : 0;   // its sides meet the ground, where the bake's vertices went dark
-          baked[v * 3] = Math.max(c.getX(v) * k, least); baked[v * 3 + 1] = Math.max(c.getY(v) * k, least); baked[v * 3 + 2] = Math.max(c.getZ(v) * k, least);
+          const open = 1 - smooth(0, 14, depth);              // under the open sky, where shade is lit by the whole blue of it
+          const r = c.getX(v) * k, g = c.getY(v) * k, b = c.getZ(v) * k;
+          baked[v * 3] = Math.max(r * (1 + open * (SKY_FILL * 0.9 - 1)), least); baked[v * 3 + 1] = Math.max(g * (1 + open * (SKY_FILL - 1)), least); baked[v * 3 + 2] = Math.max(b * (1 + open * (SKY_FILL * 1.14 - 1)), least);
         }
         g.setAttribute('baked', new THREE.BufferAttribute(baked, 3));
         g.deleteAttribute('color');
@@ -826,7 +833,10 @@ export async function loadWorld(renderer, onProgress) {
       }
       if (key.startsWith('Vault') || name === 'Interior floor' || name.startsWith('Sarcophagus')) inside.push(mesh.geometry);
     }
-    mesh.castShadow = key !== 'Planting bed (soil, needle litter)' && name !== 'Esplanade and walks' && name !== 'Basin coping';   // low and flat, they would shadow only themselves, in stripes
+    const indoors = key.startsWith('Vault') || key === 'Bore' || name === 'Interior floor' || name.startsWith('Sarcophagus') || name === 'Passage stairs';
+    if (indoors) mesh.layers.set(1);
+    if (key.startsWith('Vault')) vaults.push(mesh);                   // the basin's reflection is drawn without what it could never show
+    mesh.castShadow = !indoors && key !== 'Planting bed (soil, needle litter)' && name !== 'Esplanade and walks' && name !== 'Basin coping';   // low and flat, they would shadow only themselves, in stripes
     mesh.receiveShadow = true;
   }
   const figures = makeFigures(figureList);
@@ -846,16 +856,17 @@ export async function loadWorld(renderer, onProgress) {
   sky.material.depthTest = false; sky.renderOrder = -1;   // it sits at the far plane, which the reversed depth buffer would put in front
   const fire = makeFire();
   scene.add(fire.group);
-  const visitors = makeVisitors(scene, figureSheet, figurePlaces, { bvh, slopes: new MeshBVH(mergeGeometries(slopes)), treads: new MeshBVH(mergeGeometries(treads)) });
   const lamps = makeLamps(lampBuf);
-  scene.add(lamps, makeSconces(lampBuf, bvh));
+  const sconces = makeSconces(lampBuf, bvh);
+  lamps.layers.set(1); sconces.layers.set(1);
+  scene.add(lamps, sconces);
 
 
   // The sun is the only light here. Outdoors its shadow map covers the whole site; underground and
   // in the void it closes in on the shell, fine enough to resolve the bores it shines through.
   const sun = new THREE.DirectionalLight(0xffe2bf, 3.8);
   sun.castShadow = true;
-  sun.shadow.mapSize.setScalar(matchMedia('(pointer: coarse)').matches ? 2048 : 4096);
+  sun.shadow.mapSize.setScalar(SMALL ? 2048 : 4096);
   sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.35; sun.shadow.radius = 2.2;
   scene.add(sun, sun.target);
   let close = false, sunStrength = 3;
@@ -870,6 +881,8 @@ export async function loadWorld(renderer, onProgress) {
     sun.shadow.bias = close ? -0.0001 : -0.0003;
     sun.shadow.normalBias = close ? 0.05 : 0.35;
     sun.shadow.radius = close ? 1.6 : 2.2;
+    if (close) return;                               // the sun is off in the void: its light arrives only down the bores
+    trees.castShadows(true);
     renderer.shadowMap.needsUpdate = true;
   };
   const setSun = (u) => {
@@ -880,7 +893,6 @@ export async function loadWorld(renderer, onProgress) {
     sunStrength = 2.6 + 1.1 * lift;
     sun.intensity = close ? 0 : sunStrength;     // inside, sunlight arrives only down the bores
     SKY_LEVEL.value = 0.5 + 0.5 * lift;
-    FIGURE_LIGHT.value = 0.55 + 0.25 * lift;
     sun.position.copy(sun.target.position).addScaledVector(SUN, 1100);
   };
   // in the void only the shell and what stands inside it can matter, so nothing else is drawn or shadowed
@@ -894,13 +906,20 @@ export async function loadWorld(renderer, onProgress) {
   };
   refresh();
 
+  const visitors = makeVisitors(scene, figureSheet, figurePlaces, { bvh, slopes: new MeshBVH(mergeGeometries(slopes)), treads: new MeshBVH(mergeGeometries(treads)) },
+    { standOn, sun: { value: SUN }, sunLight: () => ({ strength: sunStrength, sky: SKY_LEVEL.value, color: sun.color }) });
+  scene.add(...visitors.meshes);
+
   const shafts = makeSunshafts(holeBuf);
   const tomb = new THREE.PointLight(0xfff0d8, 0, 42, 1.6);   // the light of all the bores, arriving together on the sarcophagus
   tomb.position.set(0, 28, 0);
   scene.add(tomb);
   shafts.mesh.visible = false;
+  for (const o of shafts.mesh.children) o.layers.set(1);
   scene.add(shafts.mesh);
 
-  return { scene, bvh, trees, water, sky, fire, visitors, sun, setSun, refresh, shadowsClose, lamps, shafts, tomb, sunStrength: () => sunStrength };
+  // the painted vault can be seen only from inside the shell or from the ways into it
+  const showVault = (on) => { for (const o of vaults) o.visible = on; figures.visible = on; };
+  return { scene, bvh, trees, showVault, water, sky, fire, visitors, sun, setSun, refresh, shadowsClose, lamps, shafts, tomb, sunStrength: () => sunStrength };
 
 }

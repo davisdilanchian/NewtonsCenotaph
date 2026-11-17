@@ -1,7 +1,8 @@
-// Daylight in the void. Each bore is a long light pipe aimed at the sarcophagus: whatever enters can
-// only leave along its axis, so its column never moves and all of them meet on the tomb. Only their strength changes. The sky
-// keeps each one faintly alive, and sunlight adds to it as the sun nears the bore's line, losing a
-// share at every bounce off the bore wall on the way down.
+// Daylight in the void. Each bore is a cone through the shell, a pinhole outside that widens to its
+// opening in the vault, aimed at the sarcophagus: what comes through leaves along its axis, so its
+// column never moves and all of them meet on the tomb. Only their strength changes. The sky keeps
+// each one faintly alive, and sunlight adds to it as the sun nears the bore's line, losing a share
+// at every bounce off the bore wall on the way down.
 import * as THREE from 'three';
 
 const MAX = 360, C = new THREE.Vector3(0, 73.5, 0), R = 67, SHELL = 8, WALL = 0.86, SKY = 0.1;

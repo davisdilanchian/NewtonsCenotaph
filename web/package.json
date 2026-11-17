@@ -12,6 +12,10 @@
     "three-mesh-bvh": "0.9.16"
   },
   "devDependencies": {
-    "astronomy-engine": "2.1.19"
+    "@gltf-transform/core": "4.5.1",
+    "@gltf-transform/extensions": "4.5.1",
+    "@gltf-transform/functions": "4.5.1",
+    "astronomy-engine": "2.1.19",
+    "draco3dgltf": "1.5.9"
   }
 }

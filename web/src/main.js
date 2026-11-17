@@ -3,13 +3,16 @@ import { loadWorld, groundHeight, CENTER, SUN } from './world.js';
 import { Player, RADIUS, WALK, RUN } from './player.js';
 import { clamp, lerp, SCALE } from './util.js';
 import { makeSound } from './sound.js';
+import { makePost } from './post.js';
 
 const $ = (id) => document.getElementById(id);
 const debug = new URLSearchParams(location.search).has('debug');
 const touch = matchMedia('(pointer: coarse)').matches;
 if (touch) document.body.classList.add('touch');
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, reversedDepthBuffer: true, powerPreference: 'high-performance', preserveDrawingBuffer: debug });
+// the scene is drawn to a floating-point image where the machine allows, and smoothed there; otherwise straight to the screen
+const floats = !!document.createElement('canvas').getContext('webgl2')?.getExtension('EXT_color_buffer_float');
+const renderer = new THREE.WebGLRenderer({ antialias: !floats, reversedDepthBuffer: true, powerPreference: 'high-performance', preserveDrawingBuffer: debug });
 renderer.setPixelRatio(Math.min(devicePixelRatio, touch ? 1.5 : 1.75));
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -18,14 +21,17 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.shadowMap.autoUpdate = false;
 document.body.prepend(renderer.domElement);
+const post = makePost(renderer);
 const canvas = renderer.domElement;
 
 let FOV = 55;                                   // vertical; [ and ] change it
 try { FOV = clamp(+localStorage.getItem('fov') || FOV, 35, 100); } catch { /* storage can be blocked */ }
 const camera = new THREE.PerspectiveCamera(FOV, innerWidth / innerHeight, 0.07, 24000);
+camera.layers.enable(1);                        // layer 1 is what only the eye sees, not the basin's reflection
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  post.setSize();
 });
 
 const DAY = 2400;                               // seconds for the sun to cross the sky
@@ -87,7 +93,8 @@ const touchMove = { x: 0, y: 0 };
 const EYE = 1.63 / SCALE;
 const sound = makeSound();
 let pace = 0, footfall = false, landing = 0;
-let time = 0, stride = 0, bob = 0, lodAt = new THREE.Vector2(1e9, 1e9), lodClock = 0, started = false;
+let time = 0, stride = 0, bob = 0, started = false;
+const TREES_NEAR = touch ? 30 : 45;              // how far the finest cypresses reach
 
 
 // On a phone the screen is a window into the space: turn to look, and walk for real to move.
@@ -248,14 +255,18 @@ function adapt(dt) {
   const fps = frames / fpsClock;
   if (debug) window.walk.fps = fps;
   frames = 0; fpsClock = 0;
-  if (fps < 38 && ratio > 0.75) { ratio = Math.max(0.75, ratio - 0.25); renderer.setPixelRatio(ratio); }
+  if (fps >= 38 || debug) return;
+  if (ratio > 1) { ratio = Math.max(1, ratio - 0.25); renderer.setPixelRatio(ratio); post.setSize(); }   // first the sharpness finer than a screen pixel,
+  else if (post.glow) post.glow = false;                                                               // then the spread of light,
+  else if (ratio > 0.75) { ratio = 0.75; renderer.setPixelRatio(ratio); post.setSize(); }               // then the picture itself
 }
 
+let hold = false;                               // the test hooks can stop the clock and step it themselves
 const timer = new THREE.Timer();
 function frame() {
   requestAnimationFrame(frame);
   timer.update();
-  tick(Math.min(timer.getDelta(), 0.05));
+  if (!hold) tick(Math.min(timer.getDelta(), 0.05));
 }
 
 function simulate(dt) {
@@ -265,7 +276,7 @@ function simulate(dt) {
   player.update(dt, input);
 }
 
-function tick(dt) {
+function tick(dt, draw = true) {
   time += dt;
   if (started) simulate(dt);
   updateCamera(dt);
@@ -281,6 +292,7 @@ function tick(dt) {
   sound.setRoom(underground() || inCrypt() ? 'passage' : inVoid ? 'void' : 'open');
   if (inVoid !== wasInVoid) { wasInVoid = inVoid; shadowClock = 0; }
   world.shadowsClose(inVoid);
+  world.showVault(inVoid || shaftLight > 0 || underground() || inCrypt());
   // the bores' light rises and falls over a second and a half, seen from the passage as well as inside
   const near = inVoid || (underground() && Math.hypot(p.x, p.z) < 90);
   shaftLight = clamp(shaftLight + (near ? dt : -dt) / 1.5, 0, 1);
@@ -292,7 +304,7 @@ function tick(dt) {
   } else world.tomb.intensity = 0;
   // outdoors the sun's shadows follow it in steps too small to see
   shadowClock -= dt;
-  if (!inVoid && (shadowClock <= 0 || keys.has('KeyT'))) { shadowClock = 0.5; world.refresh(); }
+  if (!inVoid && (shadowClock <= 0 || keys.has('KeyT'))) { shadowClock = touch ? 2 : 1; world.refresh(); }
 
   world.water.material.uniforms.time.value = time;
   world.lamps.material.uniforms.t.value = time;
@@ -300,17 +312,14 @@ function tick(dt) {
   world.lamps.material.uniforms.scale.value = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
   world.sky.material.uniforms.time.value = time;
   world.fire.update(dt, time, camera);
-  world.visitors.update(dt);
+  world.visitors.update(dt, camera, { x: p.x, z: p.z, feet: player.feet });
 
-  lodClock += dt;
-  const moved = lodAt.distanceTo({ x: p.x, y: p.z });
-  if (moved > 3 && (lodClock > 0.25 || moved > 12)) {                     // at once after a jump
-    world.trees.updateLOD(p.x, p.z, 45); lodAt.set(p.x, p.z); lodClock = 0;
-  }
+  camera.updateMatrixWorld();
+  world.trees.update(camera, p.x, p.z, TREES_NEAR, underground() || inCrypt());
 
   const label = placeLabel(player.feet);
   if ($('whereName').textContent !== label.name) show(label);
-  renderer.render(world.scene, camera);
+  if (draw) { post.render(world.scene, camera, time); world.trees.castShadows(false); }
   adapt(dt);
 }
 
@@ -401,13 +410,17 @@ async function start() {
   bindControls();
 
   arrive(PLACES[0]);
-  world.trees.updateLOD(player.pos.x, player.pos.z, 45); lodAt.set(player.pos.x, player.pos.z);
   world.fire.update(0.016, 0, camera);
   renderer.shadowMap.needsUpdate = true;
+  renderer.setRenderTarget(post.target);
   renderer.compile(world.scene, camera);
   updateCamera(0.016);
-  renderer.render(world.scene, camera);
-  if (debug) window.walk = { THREE, player, keys, input, world, camera, teleport, renderer, fps: 0, PLACES, simulate, tick, look, gyro, sound, surface, step: () => stepTaken(performance.now()), steps };
+  camera.updateMatrixWorld();
+  world.trees.update(camera, player.pos.x, player.pos.z, TREES_NEAR, false);
+  post.render(world.scene, camera);
+  world.trees.castShadows(false);
+  if (debug) window.walk = { THREE, player, keys, input, world, camera, teleport, renderer, fps: 0, PLACES, simulate, tick, look, gyro, sound, surface, step: () => stepTaken(performance.now()), steps,
+    hold: (on) => { hold = on; }, setDay: (u) => { dayClock = u; } };
   frame();
 
   $('bar').style.display = 'none';
