@@ -20,7 +20,7 @@ const PLACES = [
   ['w5', -26, 212, 3, 0, SPHERE, 2], ['e5', 26, 212, 3, 0, SPHERE, 2],
   ['head', 0, 199, 7, 0, [0, 0, 400], 4],
   ['court', 0, 180, 9, 0, SPHERE, 4], ['courtW', -17, 176, 5, 0, SPHERE, 2], ['courtE', 16, 184, 5, 0, SPHERE, 2],
-  ['foot', 0, 161.5, 7, 0, SPHERE, 1], ['top', 0, 135, 7, 5.5, [0, 0, 400], 3],
+  ['foot', 0, 166, 6, 0, SPHERE, 1], ['top', 0, 131.5, 6, 5.5, [0, 0, 400], 3],
   // the ground terrace before the arch
   ['fore', 0, 124, 6, 5.5, [0, 30, 100], 4], ['foreW', -24, 130, 6, 5.5, [0, 60, 60], 3], ['foreE', 26, 131, 6, 5.5, [0, 60, 60], 3],
   ['lionW', -45, 129.5, 2.6, 5.5, [-48, 12, 121], 3], ['lionE', 45, 129.5, 2.6, 5.5, [48, 12, 121], 3],
@@ -277,7 +277,7 @@ export function makeVisitors(scene, sheet, places, floors, { standOn, sun, sunLi
           if (ok) { p.x = nx; p.z = nz; } else { p.x += wantX * p.now * dt; p.z += wantZ * p.now * dt; }
           p.phase += p.now * dt * SCALE * 4.3 / (0.75 + 0.25 * cut.who[p.i].height * SCALE / 1.9);
         }
-        const before = p.y, floor = p.way ? heightOn(p.way, p.x, p.z) : p.node.y;
+        const before = p.y, floor = p.way ? heightOn(p.way, p.x, p.z) : p.ground ?? p.node.y;
         p.y += (floor - p.y) * Math.min(1, dt * 14);
         if (p.now > 0.02 && p.way?.heights) { const run = Math.max(p.now * dt, 1e-4), s = clamp((p.y - before) / run, -0.8, 0.8); p.slopeX += (vx * s - p.slopeX) * 0.2; p.slopeZ += (vz * s - p.slopeZ) * 0.2; }
         else { p.slopeX *= 0.9; p.slopeZ *= 0.9; }
@@ -307,6 +307,7 @@ export function makeVisitors(scene, sheet, places, floors, { standOn, sun, sunLi
         p.shade -= dt;
         if (p.shade <= 0) {
           p.shade = 0.5 + r() * 0.2;
+          p.ground = p.way ? undefined : standOn(floors, p.x, p.y + 0.8, p.z, ray);   // standing about, its feet are on whatever is really under them
           p.sunny = 0;
           if (lit === 1) { ray.origin.set(p.x, p.y + cut.who[p.i].height * 0.6, p.z); ray.direction.copy(sun.value); p.sunny = floors.bvh.raycastFirst(ray, THREE.DoubleSide) ? 0 : 1; }
         }

@@ -5,7 +5,7 @@
 // at every bounce off the bore wall on the way down.
 import * as THREE from 'three';
 
-const MAX = matchMedia('(pointer: coarse)').matches ? 700 : 1600, C = new THREE.Vector3(0, 73.5, 0), R = 67, SHELL = 8, WALL = 0.86, SKY = 0.1;
+const MAX = 1600, C = new THREE.Vector3(0, 73.5, 0), R = 67, SHELL = 8, WALL = 0.86, SKY = 0.1;
 
 const TOMB = new THREE.Vector3(0, 19, 0);            // must match bore_target in scripts/build_scene.py
 
@@ -79,6 +79,7 @@ export function makeSunshafts(holeBuffer) {
     mesh,
     scale,
     fade,
+    setMax(count) { beams.instanceCount = Math.min(count, bores.length); },   // the broadest first
     update(sun, light) {
       let total = 0;
       bores.forEach((b, i) => {

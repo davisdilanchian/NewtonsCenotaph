@@ -10,7 +10,7 @@ const LEVELS = 5;
 export function makePost(renderer) {
   // without a float colour buffer the scene is drawn straight to the screen, as it always could be
   const ok = renderer.capabilities.isWebGL2 !== false && (renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float'));
-  if (!ok) return { target: null, glow: false, setSize() {}, render(scene, camera) { renderer.render(scene, camera); } };
+  if (!ok) return { target: null, on: false, glow: false, set() {}, setSize() {}, render(scene, camera) { renderer.setRenderTarget(null); renderer.render(scene, camera); } };
 
   const tri = new THREE.BufferGeometry();
   tri.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
@@ -52,7 +52,13 @@ export function makePost(renderer) {
   const draw = (material, to) => { quad.material = material; renderer.setRenderTarget(to); renderer.render(stage, flat); };
   const post = {
     target,
+    on: true,                                        // off, the scene goes straight to the screen: the plainest picture, for the weakest machines
     glow: true,                                      // the spread of light: the first thing to go on a machine that can't keep up
+    set(on, glow, samples) {
+      post.on = on; post.glow = glow;
+      if (target.samples !== samples) { target.samples = samples; target.dispose(); }
+      post.setSize();
+    },
     setSize() {
       renderer.getDrawingBufferSize(size);
       target.setSize(size.x, size.y);
@@ -60,6 +66,7 @@ export function makePost(renderer) {
       for (const l of levels) { w = Math.max(2, w >> 1); h = Math.max(2, h >> 1); l.setSize(w, h); }
     },
     render(scene, camera, time = 0) {
+      if (!post.on) { renderer.setRenderTarget(null); renderer.render(scene, camera); return; }
       renderer.setRenderTarget(target);
       renderer.render(scene, camera);
       renderer.autoClear = false;                    // every pass covers its whole image, and the way up adds to what is there

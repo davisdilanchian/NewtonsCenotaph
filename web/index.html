@@ -76,8 +76,8 @@
   #full[hidden] { display: none; }
   #placesBtn { display: none; }
   #music[aria-pressed="false"] { text-decoration: line-through; text-decoration-thickness: 1px; opacity: .55; }
-  #music kbd { font: inherit; opacity: .6; margin-left: 7px; }
-  .touch #music kbd { display: none; }
+  #music kbd, #quality kbd { font: inherit; opacity: .6; margin-left: 7px; }
+  .touch #music kbd, .touch #quality kbd { display: none; }
   .no-sensors #corner { bottom: 116px; }
   #keys { position: absolute; left: 22px; bottom: 18px; line-height: 1.75; opacity: .82; transition: opacity 1s; }
   #keys.faded { opacity: 0; }
@@ -130,13 +130,14 @@
   <div id="where"><span id="whereName"></span><small id="whereNote"></small></div>
   <button id="placesBtn" aria-controls="places" aria-expanded="false">Places</button>
   <nav id="places" aria-label="Go to a place"></nav>
-  <div id="keys"><b>WASD</b> walk &nbsp;·&nbsp; <b>Shift</b> run &nbsp;·&nbsp; <b>Space</b> jump &nbsp;·&nbsp; <b>Mouse</b> look &nbsp;·&nbsp; <b>Esc</b> free the cursor &nbsp;·&nbsp; <b>Hold T</b> run the sun &nbsp;·&nbsp; <b>[ ]</b> field of view &nbsp;·&nbsp; <b>M</b> music</div>
+  <div id="keys"><b>WASD</b> walk &nbsp;·&nbsp; <b>Shift</b> run &nbsp;·&nbsp; <b>Space</b> jump &nbsp;·&nbsp; <b>Mouse</b> look &nbsp;·&nbsp; <b>Esc</b> free the cursor &nbsp;·&nbsp; <b>Hold T</b> run the sun &nbsp;·&nbsp; <b>[ ]</b> field of view &nbsp;·&nbsp; <b>M</b> music &nbsp;·&nbsp; <b>Q</b> picture quality</div>
   <div id="phone">Turn to look, and walk to move</div>
   <div id="stick"><i></i></div>
   <button id="jump">Jump</button>
   <div id="corner">
     <a class="follow" href="https://x.com/davisdilanchian" target="_blank" rel="noopener" aria-label="Follow @davisdilanchian on X">@davisdilanchian</a>
     <button id="full" aria-label="Full screen" hidden>⤢ Full screen</button>
+    <button id="quality" aria-label="Picture quality">◐ Auto<kbd>Q</kbd></button>
     <button id="music" aria-label="Music" aria-pressed="true">♪ Haydn<kbd>M</kbd></button>
   </div>
 </div>

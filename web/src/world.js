@@ -41,7 +41,6 @@ function load(name, srgb, renderer, manager) {
   return t;
 }
 
-const SMALL = matchMedia('(pointer: coarse)').matches;   // a phone or tablet: smaller shadow and reflection images
 const SKY_LEVEL = { value: 1 };                 // follows the height of the sun
 
 /** Weather that repeats nowhere: broad tonal drift, rain streaks, and the sphere's stone courses. */
@@ -116,6 +115,58 @@ function carving(g) {
   g.setAttribute('cavity', new THREE.BufferAttribute(out, 1));
 }
 
+// Where the oil lamps are the light: the passages beyond the reach of day, the stairs under the dais,
+// the room beneath the tomb and its way out. 0 in daylight, 1 where only the lamps reach.
+function lamplit(x, y, z) {
+  if (y < 17.6 && Math.abs(x) < 3.75 && z > -16.6 && z < 3.75) return 1;
+  if (y > 14.2) return 0;
+  const front = Math.abs(x) < 7.3 && z > 2 && z < 112, side = Math.abs(z) < 3.6 && Math.abs(x) < 125;
+  return front || side ? smooth(0, 14, Math.max(front ? 108 - z : -1e9, side ? 121 - Math.abs(x) : -1e9)) : 0;
+}
+
+/**
+ * The lamps' light, worked out at every corner rather than taken from the bake, whose corners along
+ * the passages are too few to hold a lamp's pool of light: faces there are first cut finer. A lamp
+ * lights what faces it by the inverse square of its distance, and a little of everything near it by
+ * the glow thrown back off the other walls.
+ */
+function lampLight(g, lamps) {
+  const names = Object.keys(g.attributes), src = names.map((k) => g.attributes[k]), out = names.map(() => []);
+  const P = names.indexOf('position'), pos = src[P], MAX = 0.9;
+  const corner = (i) => src.map((a) => { const v = []; for (let k = 0; k < a.itemSize; k++) v.push(a.array[i * a.itemSize + k]); return v; });
+  const mid = (a, b) => a.map((v, k) => v.map((x, j) => (x + b[k][j]) / 2));
+  const far = (a, b) => Math.hypot(a[P][0] - b[P][0], a[P][1] - b[P][1], a[P][2] - b[P][2]);
+  let cut = false;
+  for (let i = 0; i < pos.count; i += 3) {
+    const stack = [[corner(i), corner(i + 1), corner(i + 2)]];
+    while (stack.length) {
+      const [a, b, c] = stack.pop(), ab = far(a, b), bc = far(b, c), ca = far(c, a), longest = Math.max(ab, bc, ca);
+      const w = lamplit((a[P][0] + b[P][0] + c[P][0]) / 3, (a[P][1] + b[P][1] + c[P][1]) / 3, (a[P][2] + b[P][2] + c[P][2]) / 3);
+      if (w > 0 && longest > MAX && stack.length < 64) {
+        cut = true;
+        if (longest === ab) { const m = mid(a, b); stack.push([a, m, c], [m, b, c]); }
+        else if (longest === bc) { const m = mid(b, c); stack.push([a, b, m], [a, m, c]); }
+        else { const m = mid(c, a); stack.push([a, b, m], [m, b, c]); }
+      } else for (const v of [a, b, c]) v.forEach((x, k) => out[k].push(...x));
+    }
+  }
+  if (cut) names.forEach((k, j) => g.setAttribute(k, new THREE.BufferAttribute(new Float32Array(out[j]), src[j].itemSize)));
+  const p = g.attributes.position, n = g.attributes.normal, baked = g.attributes.baked;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i), w = lamplit(x, y, z);
+    if (w === 0) continue;
+    let e = 0;
+    for (let l = 0; l < lamps.length; l += 3) {
+      const dx = lamps[l] - x, dy = lamps[l + 1] - y, dz = lamps[l + 2] - z, d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 > 400) continue;
+      const d = Math.sqrt(d2), facing = Math.max(0, (n.getX(i) * dx + n.getY(i) * dy + n.getZ(i) * dz) / d), reach = 1 - smooth(12, 20, d);
+      e += LAMP * reach * (facing + 0.22) / (d2 + 0.6);
+    }
+    baked.setXYZ(i, baked.getX(i) * (1 - w) + e * w, baked.getY(i) * (1 - w) + e * 0.6 * w, baked.getZ(i) * (1 - w) + e * 0.27 * w);
+  }
+}
+const LAMP = 5.5;                             // a lamp's strength, set so the stone a stride from it glows and the far end of its reach stays dim
+
 /** World-scale UVs per triangle: courses wrap around the rings, flat tops are laid out in plan. */
 function stoneUVs(source, tile, sphere) {
   const g = source.index ? source.toNonIndexed() : source;
@@ -139,7 +190,7 @@ function stoneUVs(source, tile, sphere) {
       us = pts.map((v) => v.x); vs = pts.map((v) => v.z);
     } else if (onCone) {
       us = pts.map((v) => Math.atan2(v.x, CENTER.y - v.y) * Math.hypot(v.x, v.y - CENTER.y)); vs = pts.map((v) => v.z);
-    } else if (radial > 0.85) {
+    } else if (radial > 0.85 && R > 40) {            // only the great rings: near the axis a wall is a wall, and its courses run level
       us = unwrap(pts.map((v) => Math.atan2(v.z, v.x)), Math.PI * 2).map((v, k) => v * Math.hypot(pts[k].x, pts[k].z)); vs = pts.map((v) => v.y);   // each corner at its own radius, so neighbours agree
     } else {
       us = pts.map((v) => (Math.abs(n.x) > Math.abs(n.z) ? v.z : v.x)); vs = pts.map((v) => v.y);
@@ -556,7 +607,7 @@ function makeBasin() {
         #include <colorspace_fragment>
       }`,
   };
-  const water = new Reflector(new THREE.PlaneGeometry(40, 511), { textureWidth: SMALL ? 512 : 1024, textureHeight: SMALL ? 512 : 1024, clipBias: 0.002, shader, multisample: 0 });
+  const water = new Reflector(new THREE.PlaneGeometry(40, 511), { textureWidth: 1024, textureHeight: 1024, clipBias: 0.002, shader, multisample: 0 });
   water.rotation.x = -Math.PI / 2;
   water.position.set(0, 0.12, 462.5);
   return water;
@@ -826,6 +877,8 @@ export async function loadWorld(renderer, onProgress) {
   const ashlar = weathered(std({ color: LIMESTONE, map: T('ashlar', true), normalMap: T('ashlar_n'), normalScale: nS(0.9) }));
   const stone = T('stone', true), stoneN = T('stone_n');
   const dressed = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.5), roughness: 0.74 }), { streaks: 0.4 });
+  const hollow = std({ color: 0x1c1813, roughness: 0.95, envMapIntensity: 0.25 });
+  const cutLip = std({ color: 0x75694c, roughness: 0.85, envMapIntensity: 0.35 });
   const lionStone = weathered(std({ color: 0xefe3cc, map: stone, normalMap: stoneN, normalScale: nS(0.35), roughness: 0.66 }), { streaks: 0.6, carved: true });   // a finer, paler block, cut deep
   const boreStone = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.8 }), { streaks: 0, level: 1.5 });   // the bake's vertices are too few for these narrow bores
   const sphere = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.25), roughness: 0.72, envMapIntensity: 0.45 }), { courses: true });
@@ -869,6 +922,23 @@ export async function loadWorld(renderer, onProgress) {
     if (STEPPED.has(name)) treads.push(flat(mesh));
     if (isHelper) { mesh.visible = false; continue; }
     const key = mesh.material.name;
+    if (name === 'Inscription') {
+      // Cut into the wall, not set on it: the modelled letters stand proud, so they are pressed flat
+      // against the stone as the shadowed hollow of each cut, with its lit lower lip showing under it.
+      const flat = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld), fp = flat.attributes.position, fn = flat.attributes.normal;
+      let wall = Infinity;
+      for (let i = 0; i < fp.count; i++) wall = Math.min(wall, Math.hypot(fp.getX(i), fp.getZ(i)));
+      for (let i = 0; i < fp.count; i++) {
+        const x = fp.getX(i), z = fp.getZ(i), r = Math.hypot(x, z), k = (wall + 0.012) / r;
+        fp.setXYZ(i, x * k, fp.getY(i), z * k); fn.setXYZ(i, x / r, 0, z / r);
+      }
+      flat.deleteAttribute('color');
+      const cut = new THREE.Mesh(flat, hollow), lip = new THREE.Mesh(flat, cutLip);
+      lip.position.y = -0.035; lip.scale.set(0.99995, 1, 0.99995);
+      cut.receiveShadow = lip.receiveShadow = true;
+      scene.add(lip, cut);
+      mesh.visible = false;
+    }
     if (MATS[key]) {
       const [mat0, tile, sph] = MATS[key], mat = name === 'Lions' ? lionStone : mat0;
       if (name === 'Lions') carving(mesh.geometry);
@@ -879,9 +949,16 @@ export async function loadWorld(renderer, onProgress) {
           const x = pos.getX(v), y = pos.getY(v), z = pos.getZ(v);
           const inFront = Math.abs(x) < 7.3 && z > 2 && z < 110, inSide = Math.abs(z) < 3.5 && Math.abs(x) < 125;
           const depth = y < 14.1 ? (inFront ? 108 - z : inSide ? 121 - Math.abs(x) : 0) : 0, k = 1 + (PASSAGES - 1) * smooth(0, 14, depth);
+          const wallHead = name.startsWith('Drum (main cylinder)') || name.startsWith('Drum_(main_cylinder)');
           const least = name === 'Basin coping' ? 0.55 : 0;   // its sides meet the ground, where the bake's vertices went dark
           const open = 1 - smooth(0, 14, depth);              // under the open sky, where shade is lit by the whole blue of it
-          const r = c.getX(v) * k, g = c.getY(v) * k, b = c.getZ(v) * k;
+          let r = c.getX(v) * k, g = c.getY(v) * k, b = c.getZ(v) * k;
+          // The wall behind the inscription has corners only at its head and foot, and the bake left one
+          // bright patches at its head and foot, which its great faces drew out into wedges of light: it is
+          // given the plain shade of a wall under an overhang instead, deepening toward the top.
+          if (wallHead && z > 90 && Math.abs(x) < 45 && y > 5 && Math.abs(Math.hypot(x, z) - 104) < 1.5) { r = g = b = 0.2 + 0.2 * (1 - smooth(5.5, 43, y)); }
+          const most = open > 0.99 ? 0.7 / Math.max(g, 0.7) : 1;      // and no shade in the open is lit harder than the sky and the ground can light it
+          r *= most; g *= most; b *= most;
           baked[v * 3] = Math.max(r * (1 + open * (SKY_FILL * 0.9 - 1)), least); baked[v * 3 + 1] = Math.max(g * (1 + open * (SKY_FILL - 1)), least); baked[v * 3 + 2] = Math.max(b * (1 + open * (SKY_FILL * 1.14 - 1)), least);
         }
         g.setAttribute('baked', new THREE.BufferAttribute(baked, 3));
@@ -911,12 +988,16 @@ export async function loadWorld(renderer, onProgress) {
     const indoors = key.startsWith('Vault') || key === 'Bore' || name === 'Interior floor' || name.startsWith('Sarcophagus') || name === 'Passage stairs';
     if (indoors) mesh.layers.set(1);
     if (key.startsWith('Vault') || key === 'Bore') vaults.push(mesh);                   // the basin's reflection is drawn without what it could never show
-    mesh.castShadow = !indoors && key !== 'Planting bed (soil, needle litter)' && name !== 'Esplanade and walks' && name !== 'Basin coping';   // low and flat, they would shadow only themselves, in stripes
+    mesh.castShadow = !indoors && name !== 'Inscription' && key !== 'Planting bed (soil, needle litter)' && name !== 'Esplanade and walks' && name !== 'Basin coping';   // low and flat, they would shadow only themselves, in stripes
     mesh.receiveShadow = true;
   }
   const figures = makeFigures(figureList);
   skyThroughHoles(holeBuf, inside, [figures.geometry]);
   scene.add(root, figures);
+
+  // the lamps relight everything that stands in their light, last of all
+  const lampAt = new Float32Array(lampBuf, 4, new Uint32Array(lampBuf, 0, 1)[0] * 3);
+  root.traverse((o) => { if (o.isMesh && o.visible && o.geometry.attributes.baked && !o.geometry.index) lampLight(o.geometry, lampAt); });
 
   const collider = mergeGeometries(solids);
   const bvh = new MeshBVH(collider);
@@ -926,7 +1007,19 @@ export async function loadWorld(renderer, onProgress) {
   const trees = makeTrees(treeBuf, foliage, outdoors);
   outdoors.add(makeGround(...grass));
   const water = makeBasin();
-  outdoors.add(water);
+  // where a second drawing of the whole scene is too much to ask, the basin shows the sky's colour alone
+  const stillWater = new THREE.Mesh(water.geometry, new THREE.ShaderMaterial({
+    uniforms: { skyLevel: SKY_LEVEL },
+    vertexShader: 'varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+    fragmentShader: `uniform float skyLevel; varying vec3 vW;
+      void main(){ vec3 v = normalize(cameraPosition - vW); float f = 0.38 + 0.62 * pow(1.0 - clamp(v.y, 0.0, 1.0), 4.0);
+        gl_FragColor = vec4(mix(vec3(0.012, 0.024, 0.028), mix(vec3(1.5, 1.7, 1.9), vec3(0.45, 0.75, 1.45), clamp(v.y * 3.0, 0.0, 1.0)) * skyLevel, f), 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+  }));
+  stillWater.rotation.copy(water.rotation); stillWater.position.copy(water.position); stillWater.visible = false;
+  outdoors.add(water, stillWater);
   const sky = makeSky(renderer, scene);
   sky.material.depthTest = false; sky.renderOrder = -1;   // it sits at the far plane, which the reversed depth buffer would put in front
   const fire = makeFire();
@@ -941,7 +1034,7 @@ export async function loadWorld(renderer, onProgress) {
   // in the void it closes in on the shell, fine enough to resolve the bores it shines through.
   const sun = new THREE.DirectionalLight(0xffe2bf, 3.8);
   sun.castShadow = true;
-  sun.shadow.mapSize.setScalar(SMALL ? 2048 : 4096);
+  sun.shadow.mapSize.setScalar(2048);
   sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.35; sun.shadow.radius = 2.2;
   scene.add(sun, sun.target);
   let close = false, sunStrength = 3;
@@ -999,6 +1092,14 @@ export async function loadWorld(renderer, onProgress) {
   dark.layers.set(1);
   scene.add(dark);
   const showVault = (on) => { for (const o of vaults) o.visible = on; figures.visible = on; dark.visible = !on; };
-  return { scene, bvh, trees, showVault, water, sky, fire, visitors, sun, setSun, refresh, shadowsClose, lamps, shafts, tomb, sunStrength: () => sunStrength };
+  const setQuality = (q) => {
+    if (sun.shadow.mapSize.x !== q.shadow) { sun.shadow.mapSize.setScalar(q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
+    water.visible = q.mirror > 0; stillWater.visible = !water.visible;
+    if (q.mirror) water.getRenderTarget().setSize(q.mirror, q.mirror);
+    shafts.setMax(q.shafts);
+    visitors.meshes[2].visible = q.casts;            // their outlines on the ground
+    refresh();
+  };
+  return { scene, bvh, trees, showVault, setQuality, water, sky, fire, visitors, sun, setSun, refresh, shadowsClose, lamps, shafts, tomb, sunStrength: () => sunStrength };
 
 }

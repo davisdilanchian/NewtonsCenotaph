@@ -22,7 +22,7 @@ THREE.ShaderChunk.shadowmap_pars_fragment = THREE.ShaderChunk.shadowmap_pars_fra
 // the scene is drawn to a floating-point image where the machine allows, and smoothed there; otherwise straight to the screen
 const floats = !!document.createElement('canvas').getContext('webgl2')?.getExtension('EXT_color_buffer_float');
 const renderer = new THREE.WebGLRenderer({ antialias: !floats, reversedDepthBuffer: true, powerPreference: 'high-performance', preserveDrawingBuffer: debug });
-renderer.setPixelRatio(Math.min(devicePixelRatio, touch ? 1.5 : 1.75));
+
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.72;
@@ -96,7 +96,7 @@ function showSheets() {
 
 let world, player, dayClock = 0.2, shadowClock = 0, wasInVoid = false, shaftLight = 0;
 const lightProbe = { color: new THREE.Color(), intensity: 1 };
-const shadowSun = new THREE.Vector3(), SHADOW_STEP = THREE.MathUtils.degToRad(touch ? 0.02 : 0.01);
+const shadowSun = new THREE.Vector3();
 const keys = new Set();
 const input = { x: 0, y: 0, run: false, jump: false };
 const touchMove = { x: 0, y: 0 };
@@ -104,7 +104,6 @@ const EYE = 1.63 / SCALE;
 const sound = makeSound();
 let pace = 0, footfall = false, landing = 0;
 let time = 0, stride = 0, bob = 0, started = false;
-const TREES_NEAR = touch ? 30 : 45;              // how far the finest cypresses reach
 
 
 // On a phone the screen is a window into the space: turn to look, and walk for real to move.
@@ -257,18 +256,66 @@ function updateCamera(dt) {
   if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = lerp(camera.fov, fov, Math.min(1, dt * 6)); camera.updateProjectionMatrix(); }
 }
 
-// lower the resolution a step if the machine can't hold a good frame rate
-let frames = 0, fpsClock = 0, ratio = renderer.getPixelRatio();
+// Nothing is assumed about the machine. Four levels of picture, from a phone with no real graphics
+// chip to a desktop card; the page guesses one from what the browser says of the hardware, then
+// watches its own frame rate: it steps down as soon as it can't hold 45 a second, and tries a step up
+// only after a long steady run, never back to a level it has already fallen from. Q sets it by hand.
+const QUALITY = [
+  { name: 'Lowest', ratio: 0.75, post: false, glow: false, samples: 0, shadow: 1024, step: 0.08, mirror: 0, near: 16, shafts: 250, casts: false },
+  { name: 'Low', ratio: 1, post: true, glow: false, samples: 0, shadow: 2048, step: 0.03, mirror: 256, near: 24, shafts: 600, casts: true },
+  { name: 'Medium', ratio: 1.25, post: true, glow: true, samples: 4, shadow: 2048, step: 0.015, mirror: 512, near: 34, shafts: 1600, casts: true },
+  { name: 'High', ratio: 1.75, post: true, glow: true, samples: 4, shadow: 4096, step: 0.01, mirror: 1024, near: 45, shafts: 1600, casts: true },
+];
+function guessQuality() {
+  let chip = '';
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2'), info = gl?.getExtension('WEBGL_debug_renderer_info');
+    chip = (info && gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) || '';
+  } catch { /* some browsers hide it */ }
+  const cores = navigator.hardwareConcurrency || 4, memory = navigator.deviceMemory || 4;
+  if (/swiftshader|llvmpipe|software|basic render/i.test(chip)) return 0;          // no graphics chip at all
+  if (touch) return /apple/i.test(chip) || (cores >= 8 && memory >= 6) ? 2 : 1;
+  if (/nvidia|geforce|rtx|gtx|radeon (rx|pro)|apple m\d|arc\b/i.test(chip)) return 3;
+  return cores <= 2 || memory <= 2 ? 1 : 2;                                           // built-in graphics, or nobody's telling
+}
+const forced = new URLSearchParams(location.search).get('q');
+let chosen = null;                               // set by hand, or null while the page looks after it
+try { const v = localStorage.getItem('quality'); if (v !== null && v !== '') chosen = clamp(+v, 0, 3); } catch { /* storage can be blocked */ }
+if (forced !== null) chosen = clamp(+forced || 0, 0, 3);
+let quality = chosen ?? guessQuality(), ceiling = 3, ratio = 1, trim = 1, TREES_NEAR = 45, SHADOW_STEP = 0.0002;
+function setQuality(level) {
+  quality = level;
+  const q = QUALITY[level];
+  ratio = Math.min(devicePixelRatio, q.ratio) * trim;
+  renderer.setPixelRatio(ratio);
+  post.set(q.post, q.glow, q.samples);
+  TREES_NEAR = q.near; SHADOW_STEP = THREE.MathUtils.degToRad(q.step);
+  world?.setQuality(q);
+  shadowClock = 0;
+  if ($('quality')) $('quality').firstChild.textContent = `◐ ${chosen === null ? 'Auto' : q.name}`;
+}
+function cycleQuality() {                        // Auto, then each level from the best down
+  chosen = chosen === null ? 3 : chosen === 0 ? null : chosen - 1;
+  try { localStorage.setItem('quality', chosen ?? ''); } catch { /* storage can be blocked */ }
+  trim = 1; ceiling = 3; steady = 0;
+  setQuality(chosen ?? guessQuality());
+  $('whereNote').textContent = chosen === null ? `Picture quality: automatic (now ${QUALITY[quality].name.toLowerCase()})` : `Picture quality: ${QUALITY[quality].name.toLowerCase()}`;
+}
+
+let frames = 0, fpsClock = 0, settle = 2, steady = 0, age = 0;
 function adapt(dt) {
-  frames++; fpsClock += dt;
-  if (fpsClock < 2) return;
+  frames++; fpsClock += dt; age += dt;
+  if (fpsClock < (age < 8 ? 1 : 2)) return;      // quick to judge at first, when a wrong guess hurts most
   const fps = frames / fpsClock;
   if (debug) window.walk.fps = fps;
   frames = 0; fpsClock = 0;
-  if (fps >= 38 || debug) return;
-  if (ratio > 1) { ratio = Math.max(1, ratio - 0.25); renderer.setPixelRatio(ratio); post.setSize(); }   // first the sharpness finer than a screen pixel,
-  else if (post.glow) post.glow = false;                                                               // then the spread of light,
-  else if (ratio > 0.75) { ratio = 0.75; renderer.setPixelRatio(ratio); post.setSize(); }               // then the picture itself
+  if (debug || document.hidden) return;
+  if (settle > 0) { settle--; return; }          // the moment after a change is spent compiling, and proves nothing
+  if (fps < 45) {
+    steady = 0; settle = 1;
+    if (chosen === null && quality > 0) { ceiling = quality - 1; setQuality(quality - 1); }
+    else if (fps < 30 && trim > 0.55) { trim = Math.max(0.55, trim - 0.15); setQuality(quality); }      // nothing left to give up but sharpness
+  } else if (chosen === null && fps > 57 && quality < ceiling && ++steady >= 6) { steady = 0; settle = 2; setQuality(quality + 1); }
 }
 
 let hold = false;                               // the test hooks can stop the clock and step it themselves
@@ -339,6 +386,7 @@ function bindControls() {
     if (e.code === 'Space') { input.jump = true; e.preventDefault(); }
     if (e.code === 'KeyR') teleport(0);
     if (e.code === 'KeyM') toggleMusic();
+    if (e.code === 'KeyQ') cycleQuality();
     if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
       FOV = clamp(FOV + (e.code === 'BracketRight' ? 5 : -5), 35, 100);
       $('whereNote').textContent = `Field of view ${FOV}°`;
@@ -384,6 +432,7 @@ function bindControls() {
   $('jump').addEventListener('touchstart', (e) => { input.jump = true; e.preventDefault(); }, { passive: false });
 
   $('music').addEventListener('click', toggleMusic);
+  $('quality').addEventListener('click', cycleQuality);
   showMusic();
   const openPlaces = (open) => { $('places').classList.toggle('open', open); $('placesBtn').setAttribute('aria-expanded', open); };
   $('placesBtn').addEventListener('click', () => openPlaces(!$('places').classList.contains('open')));
@@ -421,7 +470,8 @@ async function start() {
   arrive(PLACES[0]);
   world.fire.update(0.016, 0, camera);
   renderer.shadowMap.needsUpdate = true;
-  renderer.setRenderTarget(post.target);
+  setQuality(quality);
+  renderer.setRenderTarget(post.on ? post.target : null);
   renderer.compile(world.scene, camera);
   updateCamera(0.016);
   camera.updateMatrixWorld();
