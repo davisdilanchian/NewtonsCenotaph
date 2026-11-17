@@ -5,7 +5,7 @@
 // at every bounce off the bore wall on the way down.
 import * as THREE from 'three';
 
-const MAX = 360, C = new THREE.Vector3(0, 73.5, 0), R = 67, SHELL = 8, WALL = 0.86, SKY = 0.1;
+const MAX = matchMedia('(pointer: coarse)').matches ? 700 : 1600, C = new THREE.Vector3(0, 73.5, 0), R = 67, SHELL = 8, WALL = 0.86, SKY = 0.1;
 
 const TOMB = new THREE.Vector3(0, 19, 0);            // must match bore_target in scripts/build_scene.py
 
@@ -13,9 +13,8 @@ export function makeSunshafts(holeBuffer) {
   const n = new Uint32Array(holeBuffer, 0, 1)[0], data = new Float32Array(holeBuffer, 4, n * 4), bores = [];
   for (let i = 0; i < n; i++) {
     const d = new THREE.Vector3().fromArray(data, i * 4), r = data[i * 4 + 3];
-    if (r < 0.13) continue;                          // the faintest stars pass too little to see in the air
     const inner = d.clone().multiplyScalar(R).add(C), end = TOMB, axis = inner.clone().sub(end).normalize();
-    bores.push({ inner, end, axis, r, length: SHELL / Math.max(0.3, axis.dot(d)) });
+    bores.push({ inner, end, axis, r, d, length: SHELL / Math.max(0.3, axis.dot(d)) });
   }
   bores.sort((a, b) => b.r - a.r);
   bores.length = Math.min(bores.length, MAX);
@@ -27,7 +26,7 @@ export function makeSunshafts(holeBuffer) {
   beams.instanceCount = bores.length;
   pack(beams, 'from', 3, (a, i, b) => a.setXYZ(i, b.inner.x, b.inner.y, b.inner.z));
   pack(beams, 'to', 3, (a, i, b) => a.setXYZ(i, b.end.x, b.end.y, b.end.z));
-  pack(beams, 'radius', 1, (a, i, b) => a.setX(i, b.r * 1.5));
+  pack(beams, 'radius', 1, (a, i, b) => a.setX(i, b.r * 1.35 + 0.05));   // the width of its opening in the vault
   const beamGlow = pack(beams, 'glow', 1, () => {});
   const fade = { value: 0 };                         // the light comes up gently when you arrive, never all at once
   const uniforms = { tint: { value: new THREE.Color() } };
@@ -35,7 +34,7 @@ export function makeSunshafts(holeBuffer) {
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.BackSide, uniforms,
     vertexShader: `attribute vec3 from, to; attribute float radius, glow; varying vec3 vWorld, vA, vB; varying float vR, vGlow, vAlong;
       void main(){ vec3 axis = normalize(to - from), u = normalize(cross(axis, vec3(0.31, 0.17, 0.93))), v = cross(axis, u);
-        vec3 p = mix(from, to, position.y) + (u * position.x + v * position.z) * radius * 1.15;
+        vec3 p = mix(from, to, position.y) + (u * position.x + v * position.z) * radius * 1.1;
         vWorld = p; vA = from; vB = to; vR = radius; vGlow = glow; vAlong = position.y; gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0); }`,
     fragmentShader: `uniform vec3 tint; varying vec3 vWorld, vA, vB; varying float vR, vGlow, vAlong;
       void main(){ vec3 d = normalize(vWorld - cameraPosition), ax = normalize(vB - vA), oc = cameraPosition - vA;
@@ -51,9 +50,12 @@ export function makeSunshafts(holeBuffer) {
   column.frustumCulled = false;
 
   // every opening glows with the daylight coming through it, however faint its star
-  const seen = new THREE.BufferGeometry(), at = new Float32Array(n * 3), size = new Float32Array(n), d = new THREE.Vector3();
+  // it sits in the mouth of its bore, on the bore's own line to the tomb, where its column begins
+  const seen = new THREE.BufferGeometry(), at = new Float32Array(n * 3), size = new Float32Array(n), d = new THREE.Vector3(), ax = new THREE.Vector3();
   for (let i = 0; i < n; i++) {
-    d.fromArray(data, i * 4).multiplyScalar(R - 1).add(C);
+    d.fromArray(data, i * 4).multiplyScalar(R).add(C);
+    ax.subVectors(TOMB, d).normalize();
+    d.addScaledVector(ax, 0.25);
     at.set([d.x, d.y, d.z], i * 3);
     size[i] = data[i * 4 + 3];
   }

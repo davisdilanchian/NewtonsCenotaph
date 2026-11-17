@@ -45,11 +45,11 @@ const SMALL = matchMedia('(pointer: coarse)').matches;   // a phone or tablet: s
 const SKY_LEVEL = { value: 1 };                 // follows the height of the sun
 
 /** Weather that repeats nowhere: broad tonal drift, rain streaks, and the sphere's stone courses. */
-function weathered(mat, { streaks = 1, courses = false, level = 1, loose = false } = {}) {
+function weathered(mat, { streaks = 1, courses = false, level = 1, loose = false, carved = false } = {}) {
   mat.onBeforeCompile = (s) => {
     s.uniforms.skyLevel = SKY_LEVEL;
-    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWP, vBaked; attribute vec3 baked;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWP = (modelMatrix * vec4(position, 1.0)).xyz; vBaked = baked;');
+    s.vertexShader = s.vertexShader.replace('#include <common>', `#include <common>\nvarying vec3 vWP, vBaked; attribute vec3 baked;${carved ? ' attribute float cavity; varying float vCavity;' : ''}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\nvWP = (modelMatrix * vec4(position, 1.0)).xyz; vBaked = baked;${carved ? ' vCavity = cavity;' : ''}`);
     s.fragmentShader = s.fragmentShader.replace('#include <lights_fragment_maps>', `#include <lights_fragment_maps>
       #ifdef USE_ENVMAP
         iblIrradiance = vec3(0.0);                    // diffuse sky comes from the path traced bake instead
@@ -57,7 +57,7 @@ function weathered(mat, { streaks = 1, courses = false, level = 1, loose = false
       #endif
       irradiance += vBaked * skyLevel * ${level.toFixed(3)};`)
       .replace('#include <common>', `#include <common>
-      varying vec3 vWP, vBaked; uniform float skyLevel;
+      varying vec3 vWP, vBaked; uniform float skyLevel;${carved ? ' varying float vCavity;' : ''}
       float vh(vec3 p) { p = fract(p * 0.3183 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
       float vn(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         return mix(mix(mix(vh(i), vh(i + vec3(1, 0, 0)), f.x), mix(vh(i + vec3(0, 1, 0)), vh(i + vec3(1, 1, 0)), f.x), f.y),
@@ -67,6 +67,8 @@ function weathered(mat, { streaks = 1, courses = false, level = 1, loose = false
       ${loose ? `vec3 again = texture2D(map, mat2(0.8, 0.6, -0.6, 0.8) * vMapUv * 0.231 + 0.37).rgb;   // the same gravel turned and far larger, so no tile repeats
       diffuseColor.rgb = mix(diffuseColor.rgb, diffuse * again, 0.5) * (0.9 + 0.2 * fb(vWP * 0.9));` : ''}
       diffuseColor.rgb *= 0.8 + 0.3 * fb(vWP * 0.016) + 0.1 * fb(vWP * 0.13);
+      ${carved ? `float hollow = clamp(vCavity, 0.0, 1.0), proud = clamp(-vCavity, 0.0, 1.0);          // carving: grime gathers in the cuts, and weather pales what stands proud
+      diffuseColor.rgb = mix(diffuseColor.rgb * (1.0 + 0.3 * proud), diffuseColor.rgb * vec3(0.3, 0.29, 0.26), 0.85 * hollow * hollow + 0.3 * hollow);` : ''}
       float lng = atan(vWP.z, vWP.x), upright = 1.0 - abs(normalize(cross(dFdx(vWP), dFdy(vWP))).y);
       diffuseColor.rgb *= 1.0 - ${streaks.toFixed(1)} * 0.2 * upright * upright * smoothstep(0.52, 0.8, fb(vec3(lng * 46.0, vWP.y * 0.016, 2.0)));
       ${courses ? `vec3 sd = normalize(vWP - vec3(0.0, 73.5, 0.0));
@@ -78,6 +80,40 @@ function weathered(mat, { streaks = 1, courses = false, level = 1, loose = false
       diffuseColor.rgb *= (1.0 - 0.3 * joint * seen) * (0.97 + 0.06 * vh(vec3(floor(along), row, 1.0)) * seen);` : ''}`);
   };
   return mat;
+}
+
+/**
+ * How hollow or proud the surface is at each vertex, from how far its neighbours stand above or
+ * below it: about 1 in the bottom of a cut, about -1 on a ridge.
+ */
+function carving(g) {
+  const p = g.attributes.position, n = g.attributes.normal, key = new Map(), of = new Uint32Array(p.count), near = [];
+  for (let i = 0; i < p.count; i++) {
+    const k = `${Math.round(p.getX(i) * 400)},${Math.round(p.getY(i) * 400)},${Math.round(p.getZ(i) * 400)}`;
+    if (!key.has(k)) { key.set(k, near.length); near.push(new Set()); }
+    of[i] = key.get(k);
+  }
+  const ix = g.index, tri = ix ? ix.count : p.count, first = new Uint32Array(near.length).fill(0xffffffff);
+  for (let i = 0; i < p.count; i++) if (first[of[i]] === 0xffffffff) first[of[i]] = i;
+  for (let t = 0; t < tri; t += 3) {
+    const a = of[ix ? ix.getX(t) : t], b = of[ix ? ix.getX(t + 1) : t + 1], c = of[ix ? ix.getX(t + 2) : t + 2];
+    near[a].add(b).add(c); near[b].add(a).add(c); near[c].add(a).add(b);
+  }
+  let curve = new Float32Array(near.length);
+  near.forEach((set, v) => {
+    const i = first[v];
+    let x = 0, y = 0, z = 0, len = 0;
+    for (const w of set) { const j = first[w]; x += p.getX(j) - p.getX(i); y += p.getY(j) - p.getY(i); z += p.getZ(j) - p.getZ(i); len += Math.hypot(p.getX(j) - p.getX(i), p.getY(j) - p.getY(i), p.getZ(j) - p.getZ(i)); }
+    curve[v] = set.size ? (x * n.getX(i) + y * n.getY(i) + z * n.getZ(i)) / len : 0;
+  });
+  for (let pass = 0; pass < 3; pass++) {            // gathered over a finger's breadth, so a cut reads as a cut and not as noise
+    const next = new Float32Array(near.length);
+    near.forEach((set, v) => { let sum = curve[v] * 2; for (const w of set) sum += curve[w]; next[v] = sum / (set.size + 2); });
+    curve = next;
+  }
+  const out = new Float32Array(p.count);
+  for (let i = 0; i < p.count; i++) out[i] = THREE.MathUtils.clamp(curve[of[i]] * 9, -1, 1);
+  g.setAttribute('cavity', new THREE.BufferAttribute(out, 1));
 }
 
 /** World-scale UVs per triangle: courses wrap around the rings, flat tops are laid out in plan. */
@@ -336,8 +372,8 @@ function makeTrees(buffer, foliage, scene) {
         .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
           #if LOD == 0
             float rim = 1.0 - abs(dot(normalize(vNormal), normalize(vViewPosition)));
-            float tuft = fract(sin(dot(floor(vMapUv * vec2(26.0, 34.0)), vec2(12.9898, 78.233))) * 43758.5453);
-            if (rim > 0.42 + 0.5 * tuft) discard;
+            float tuft = fract(sin(dot(floor(vMapUv * vec2(70.0, 90.0)), vec2(12.9898, 78.233))) * 43758.5453);
+            if (rim > 0.66 + 0.34 * tuft) discard;
           #endif`)
         .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
           float d = distance(vTreeAt, cameraPosition.xz), n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
@@ -388,7 +424,7 @@ function makeTrees(buffer, foliage, scene) {
   // map on the frames that map is redrawn: the trees on screen can then be only the ones in view.
   const unseen = new THREE.ShaderMaterial({ vertexShader: 'void main(){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); }', fragmentShader: 'void main(){ gl_FragColor = vec4(0.0); }', colorWrite: false, depthWrite: false, depthTest: false });
   const casters = sets.map((lods, v) => {
-    const mesh = new THREE.InstancedMesh(lods[2].geometry, unseen, nTrees);
+    const mesh = new THREE.InstancedMesh(lods[3].geometry, unseen, nTrees);
     let k = 0;
     for (let i = v; i < nTrees; i += VARIANTS) mesh.instanceMatrix.array.set(mats.subarray(i * 16, i * 16 + 16), 16 * k++);
     mesh.count = k; mesh.castShadow = true; mesh.frustumCulled = false; mesh.visible = false;
@@ -790,6 +826,7 @@ export async function loadWorld(renderer, onProgress) {
   const ashlar = weathered(std({ color: LIMESTONE, map: T('ashlar', true), normalMap: T('ashlar_n'), normalScale: nS(0.9) }));
   const stone = T('stone', true), stoneN = T('stone_n');
   const dressed = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.5), roughness: 0.74 }), { streaks: 0.4 });
+  const lionStone = weathered(std({ color: 0xefe3cc, map: stone, normalMap: stoneN, normalScale: nS(0.35), roughness: 0.66 }), { streaks: 0.6, carved: true });   // a finer, paler block, cut deep
   const boreStone = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.8 }), { streaks: 0, level: 1.5 });   // the bake's vertices are too few for these narrow bores
   const sphere = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.25), roughness: 0.72, envMapIntensity: 0.45 }), { courses: true });
   const vault = weathered(std({ color: new THREE.Color(0.05, 0.05, 0.053), map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.88, dithering: true }), { courses: true, streaks: 0 });   // painted black, so the stars stand out
@@ -833,7 +870,8 @@ export async function loadWorld(renderer, onProgress) {
     if (isHelper) { mesh.visible = false; continue; }
     const key = mesh.material.name;
     if (MATS[key]) {
-      const [mat, tile, sph] = MATS[key];
+      const [mat0, tile, sph] = MATS[key], mat = name === 'Lions' ? lionStone : mat0;
+      if (name === 'Lions') carving(mesh.geometry);
       const g = stoneUVs(mesh.geometry, tile, sph);
       if (g.attributes.color) {
         const c = g.attributes.color, pos = g.attributes.position, baked = new Float32Array(c.count * 3);
@@ -917,7 +955,7 @@ export async function loadWorld(renderer, onProgress) {
     cam.updateProjectionMatrix();
     sun.shadow.bias = close ? -0.0001 : -0.0003;
     sun.shadow.normalBias = close ? 0.05 : 0.35;
-    sun.shadow.radius = close ? 1.6 : 2.2;
+    sun.shadow.radius = close ? 1.6 : 1.6;
     if (close) return;                               // the sun is off in the void: its light arrives only down the bores
     trees.castShadows(true);
     renderer.shadowMap.needsUpdate = true;

@@ -10,6 +10,15 @@ const debug = new URLSearchParams(location.search).has('debug');
 const touch = matchMedia('(pointer: coarse)').matches;
 if (touch) document.body.classList.add('touch');
 
+// three.js softens shadow edges by turning its samples a different way at every pixel, which prints a
+// fine hatch across every soft edge. Nine fixed, overlapping samples give the same softness, smooth.
+THREE.ShaderChunk.shadowmap_pars_fragment = THREE.ShaderChunk.shadowmap_pars_fragment.replace(
+  /float phi = interleavedGradientNoise\( gl_FragCoord\.xy \) \* PI2;\s*shadow = \([\s\S]*?\) \* 0\.2;/,
+  `shadow = 0.0;
+   for ( int i = -1; i <= 1; i ++ ) for ( int j = -1; j <= 1; j ++ )
+     shadow += texture( shadowMap, vec3( shadowCoord.xy + vec2( float( i ), float( j ) ) * radius * 0.7, shadowCoord.z ) );
+   shadow /= 9.0;`);
+
 // the scene is drawn to a floating-point image where the machine allows, and smoothed there; otherwise straight to the screen
 const floats = !!document.createElement('canvas').getContext('webgl2')?.getExtension('EXT_color_buffer_float');
 const renderer = new THREE.WebGLRenderer({ antialias: !floats, reversedDepthBuffer: true, powerPreference: 'high-performance', preserveDrawingBuffer: debug });
@@ -87,6 +96,7 @@ function showSheets() {
 
 let world, player, dayClock = 0.2, shadowClock = 0, wasInVoid = false, shaftLight = 0;
 const lightProbe = { color: new THREE.Color(), intensity: 1 };
+const shadowSun = new THREE.Vector3(), SHADOW_STEP = THREE.MathUtils.degToRad(touch ? 0.02 : 0.01);
 const keys = new Set();
 const input = { x: 0, y: 0, run: false, jump: false };
 const touchMove = { x: 0, y: 0 };
@@ -302,9 +312,8 @@ function tick(dt, draw = true) {
     lightProbe.color.copy(world.sun.color); lightProbe.intensity = world.sunStrength();
     world.tomb.intensity = world.shafts.update(SUN, lightProbe) * 14 * world.shafts.fade.value;
   } else world.tomb.intensity = 0;
-  // outdoors the sun's shadows follow it in steps too small to see
-  shadowClock -= dt;
-  if (!inVoid && (shadowClock <= 0 || keys.has('KeyT'))) { shadowClock = touch ? 2 : 1; world.refresh(); }
+  // outdoors the sun's shadows follow it, redrawn whenever it has moved a fraction of one of their texels
+  if (!inVoid && (shadowClock <= 0 || SUN.angleTo(shadowSun) > SHADOW_STEP)) { shadowClock = 1; shadowSun.copy(SUN); world.refresh(); }
 
   world.water.material.uniforms.time.value = time;
   world.lamps.material.uniforms.t.value = time;
