@@ -45,7 +45,7 @@ const SMALL = matchMedia('(pointer: coarse)').matches;   // a phone or tablet: s
 const SKY_LEVEL = { value: 1 };                 // follows the height of the sun
 
 /** Weather that repeats nowhere: broad tonal drift, rain streaks, and the sphere's stone courses. */
-function weathered(mat, { streaks = 1, courses = false, level = 1 } = {}) {
+function weathered(mat, { streaks = 1, courses = false, level = 1, loose = false } = {}) {
   mat.onBeforeCompile = (s) => {
     s.uniforms.skyLevel = SKY_LEVEL;
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWP, vBaked; attribute vec3 baked;')
@@ -64,6 +64,8 @@ function weathered(mat, { streaks = 1, courses = false, level = 1 } = {}) {
                    mix(mix(vh(i + vec3(0, 0, 1)), vh(i + vec3(1, 0, 1)), f.x), mix(vh(i + vec3(0, 1, 1)), vh(i + vec3(1, 1, 1)), f.x), f.y), f.z); }
       float fb(vec3 p) { return 0.55 * vn(p) + 0.3 * vn(p * 2.1 + 3.1) + 0.15 * vn(p * 4.3 + 7.7); }`)
       .replace('#include <map_fragment>', `#include <map_fragment>
+      ${loose ? `vec3 again = texture2D(map, mat2(0.8, 0.6, -0.6, 0.8) * vMapUv * 0.231 + 0.37).rgb;   // the same gravel turned and far larger, so no tile repeats
+      diffuseColor.rgb = mix(diffuseColor.rgb, diffuse * again, 0.5) * (0.9 + 0.2 * fb(vWP * 0.9));` : ''}
       diffuseColor.rgb *= 0.8 + 0.3 * fb(vWP * 0.016) + 0.1 * fb(vWP * 0.13);
       float lng = atan(vWP.z, vWP.x), upright = 1.0 - abs(normalize(cross(dFdx(vWP), dFdy(vWP))).y);
       diffuseColor.rgb *= 1.0 - ${streaks.toFixed(1)} * 0.2 * upright * upright * smoothstep(0.52, 0.8, fb(vec3(lng * 46.0, vWP.y * 0.016, 2.0)));
@@ -227,30 +229,61 @@ const cypressOutline = (t) => smooth(0, 0.08, t) ** 0.5 * (1 - t ** 2.6) ** 0.8;
 const CYPRESS_R = 1.42, CYPRESS_BASE = 0.12;     // a cypress keeps its foliage nearly to the ground
 
 /**
- * One tree, one body: upright flame-shaped sprays packed round the trunk on a spiral, the way
- * cypress foliage really grows. Fewer, broader sprays make the distant versions of the same tree.
+ * One tree: a dense column, as an Italian cypress is, lumpy where its upright branches press
+ * together, with sprays lying close against it that break its outline. The distant versions keep the
+ * column and lose the sprays.
  */
-function cypressTree(sprays, sides, rings, seed, H) {
+function cypressTree({ sprays, sides, rings, around, up }, seed, H) {
   const r = rng(Math.round(seed * 991) + 17), pos = [], nor = [], uv = [], col = [], idx = [];
-  const fat = Math.sqrt(120 / sprays), axis = new THREE.Vector3(), side = new THREE.Vector3(), out = new THREE.Vector3(), radial = new THREE.Vector3(), p = new THREE.Vector3();
+  // the column
+  const lump = (a, y) => noise3(Math.cos(a) * 1.5 + seed, y * 0.55, Math.sin(a) * 1.5) * 0.7 + noise3(Math.cos(a) * 4.1, y * 1.7 + seed, Math.sin(a) * 4.1) * 0.3;
+  const body = (a, t) => CYPRESS_R * cypressOutline(t) * (0.72 + 0.4 * lump(a + t * 1.3, t * H));
+  for (let j = 0; j <= up; j++) {
+    const t = (j / up) ** 0.9, y = CYPRESS_BASE + t * (H - CYPRESS_BASE);
+    for (let k = 0; k <= around; k++) {
+      const a = ((k % around) / around) * Math.PI * 2, rad = body(a, t), l = lump(a + t * 1.3, t * H);
+      pos.push(Math.cos(a) * rad, y, Math.sin(a) * rad);
+      nor.push(0, 0, 0);
+      uv.push((k / around) * 3, y / 2.4);
+      const shade = (0.5 + 0.5 * smooth(0, 0.4, t)) * (0.5 + 0.85 * l);        // dark in the folds between its branches, and under its skirt
+      col.push(shade, shade, shade);
+    }
+  }
+  for (let j = 0; j < up; j++) for (let k = 0; k < around; k++) {
+    const u = j * (around + 1) + k, v = u + around + 1;
+    idx.push(u, v, u + 1, v, v + 1, u + 1);
+  }
+  const column = new THREE.BufferGeometry();
+  column.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  column.setIndex(idx);
+  column.computeVertexNormals();
+  const cn = column.attributes.normal;
+  for (let j = 0; j <= up; j++) {                    // the seam shades as one surface
+    const u = j * (around + 1), v = u + around, x = cn.getX(u) + cn.getX(v), y = cn.getY(u) + cn.getY(v), z = cn.getZ(u) + cn.getZ(v), l = Math.hypot(x, y, z) || 1;
+    cn.setXYZ(u, x / l, y / l, z / l); cn.setXYZ(v, x / l, y / l, z / l);
+  }
+  for (let i = 0; i < cn.count; i++) { nor[i * 3] = cn.getX(i); nor[i * 3 + 1] = cn.getY(i); nor[i * 3 + 2] = cn.getZ(i); }
+
+  // the sprays, each rising close against the column from a spiral round it
+  const fat = Math.sqrt(120 / Math.max(sprays, 1)), axis = new THREE.Vector3(), side = new THREE.Vector3(), out = new THREE.Vector3(), radial = new THREE.Vector3(), p = new THREE.Vector3();
   for (let i = 0; i < sprays; i++) {
-    const t = ((i + 0.5) / sprays) ** 0.86, a = i * 2.39996 + (r() - 0.5) * 0.5, ca = Math.cos(a), sa = Math.sin(a);
-    const edge = CYPRESS_R * cypressOutline(Math.min(t + 0.06, 1)), length = (1.9 + r() * 1.0) * (1 - 0.42 * t) * (0.75 + 0.25 * fat);
-    const width = Math.max(0.1, (0.2 + r() * 0.08) * fat * (1.05 - 0.6 * t)), low = CYPRESS_BASE + t * (H - CYPRESS_BASE - length * 0.55);
-    const hip = new THREE.Vector3(ca * edge * 0.3, low, sa * edge * 0.3), tip = new THREE.Vector3(ca * edge * (0.72 + r() * 0.26), low + length, sa * edge * (0.72 + r() * 0.26));
+    const t = ((i + 0.5) / sprays) ** 0.9 * 0.93, a = i * 2.39996 + (r() - 0.5) * 0.5, ca = Math.cos(a), sa = Math.sin(a);
+    const length = (0.9 + r() * 0.7) * (1 - 0.35 * t) * (0.8 + 0.2 * fat), low = CYPRESS_BASE + t * (H - CYPRESS_BASE), t1 = Math.min(1, t + length / H);
+    const width = Math.max(0.07, (0.13 + r() * 0.06) * fat * (1.05 - 0.5 * t));
+    const hip = new THREE.Vector3(ca, 0, sa).multiplyScalar(body(a, t) * 0.8).setY(low), tip = new THREE.Vector3(ca, 0, sa).multiplyScalar(body(a, t1) * 0.9 + 0.1 + r() * 0.14).setY(low + length);
     axis.subVectors(tip, hip).normalize(); side.set(-sa, 0, ca); out.crossVectors(side, axis).negate();
-    const base = pos.length / 3, tone = (0.6 + 0.46 * smooth(0, 0.4, t)) * (0.78 + r() * 0.42);
+    const base = pos.length / 3, tone = (0.62 + 0.4 * smooth(0, 0.4, t)) * (0.8 + r() * 0.4);
     for (let j = 0; j <= rings; j++) {
-      const s = j / rings, swell = Math.sin(Math.PI * s ** 0.62) ** 0.75, wobble = 1 + 0.16 * Math.sin(s * 9 + i);
+      const q0 = j / rings, swell = Math.sin(Math.PI * q0 ** 0.62) ** 0.75;
       for (let k = 0; k <= sides; k++) {
-        const q = ((k % sides) / sides) * Math.PI * 2, cq = Math.cos(q), sq = Math.sin(q), w = width * swell * wobble;
-        p.lerpVectors(hip, tip, s).addScaledVector(side, cq * w).addScaledVector(out, sq * w * 0.8);
-        p.x += ca * 0.28 * Math.sin(Math.PI * s); p.z += sa * 0.28 * Math.sin(Math.PI * s);
+        const q = ((k % sides) / sides) * Math.PI * 2, cq = Math.cos(q), sq = Math.sin(q), w = width * swell;
+        p.lerpVectors(hip, tip, q0).addScaledVector(side, cq * w).addScaledVector(out, sq * w * 0.7);
+        p.x += ca * 0.12 * Math.sin(Math.PI * q0); p.z += sa * 0.12 * Math.sin(Math.PI * q0);
         pos.push(p.x, p.y, p.z);
-        radial.set(ca, 0.12, sa).multiplyScalar(0.72).addScaledVector(side, cq * 0.5).addScaledVector(out, sq * 0.5).normalize();
+        radial.set(ca, 0.15, sa).multiplyScalar(0.8).addScaledVector(side, cq * 0.4).addScaledVector(out, sq * 0.4).normalize();
         nor.push(radial.x, radial.y, radial.z);
-        uv.push((k / sides) * 1.4, (s * length) / 2.4 + i * 0.37);
-        const shade = tone * (0.34 + 0.8 * smooth(0.1, 0.85, s)) * (0.78 + 0.22 * sq);
+        uv.push((k / sides) * 1.4, (q0 * length) / 2.4 + i * 0.37);
+        const shade = tone * (0.5 + 0.62 * smooth(0.05, 0.8, q0)) * (0.82 + 0.18 * sq);
         col.push(shade, shade, shade);
       }
     }
@@ -326,8 +359,8 @@ function makeTrees(buffer, foliage, scene) {
   });
   const sets = [];
   for (let v = 0; v < VARIANTS; v++) {
-    sets.push([[170, 5, 4], [46, 4, 3], [18, 3, 2], [8, 3, 2]].map(([sprays, sides, rings], lod) => {
-      const mesh = new THREE.InstancedMesh(cypressTree(sprays, sides, rings, v * 9.1, heights[v]), levels[lod], nTrees);
+    sets.push([{ sprays: 150, sides: 5, rings: 3, around: 14, up: 18 }, { sprays: 40, sides: 4, rings: 2, around: 10, up: 12 }, { sprays: 9, sides: 3, rings: 2, around: 8, up: 8 }, { sprays: 0, sides: 3, rings: 1, around: 6, up: 5 }].map((spec, lod) => {
+      const mesh = new THREE.InstancedMesh(cypressTree(spec, v * 9.1, heights[v]), levels[lod], nTrees);
       mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.count = 0;
       scene.add(mesh);
       return mesh;
@@ -338,7 +371,7 @@ function makeTrees(buffer, foliage, scene) {
     const o = i * 6, t = { x: data[o], y: data[o + 1], z: data[o + 2], r: 1.35, v: i % VARIANTS };   // crowns nearly touch: the rows are hedges
     p.set(t.x, t.y, t.z); q.setFromAxisAngle(yAxis, data[o + 3]); s.set(data[o + 4], data[o + 5], data[o + 4]);
     m.compose(p, q, s).toArray(mats, i * 16);
-    tint.setHSL(0.3 + r() * 0.03, 0.5 + r() * 0.12, 0.3 + r() * 0.08).toArray(tints, i * 3);
+    tint.setHSL(0.275 + r() * 0.035, 0.3 + r() * 0.1, 0.27 + r() * 0.07).toArray(tints, i * 3);   // the grey green of cypress, no two alike
     t.mid = t.y + 5.4 * data[o + 5];
     trunks.setMatrixAt(i, m);
     trees.push(t); hash.add(t);
@@ -474,9 +507,13 @@ function makeBasin() {
       float w(vec2 p, float t){ return sin(p.x * 0.9 + t) * sin(p.y * 0.33 - t * 0.6) + 0.5 * sin(p.x * 2.3 - t * 1.3 + p.y * 1.1); }
       void main(){
         vec3 v = normalize(cameraPosition - vW);
-        vec2 r = vec2(w(vW.xz, time), w(vW.zx + 7.0, time * 0.8)) * 0.0032 * smoothstep(900.0, 40.0, length(cameraPosition - vW))
+        float far = length(cameraPosition - vW);
+        vec2 r = vec2(w(vW.xz, time), w(vW.zx + 7.0, time * 0.8)) * 0.0022 * smoothstep(420.0, 15.0, far)
                * smoothstep(0.0, 1.2, 20.0 - abs(vW.x));   // still against the coping, or the ripple shows sky along its foot
-        vec3 c = texture2DProj(tDiffuse, vUv + vec4(r * vUv.w, 0.0, 0.0)).rgb;
+        vec4 at = vUv + vec4(r * vUv.w, 0.0, 0.0);
+        float soft = vUv.w * (0.0015 + 0.004 * smoothstep(20.0, 300.0, far));   // a reflection drawn out a little along the eye's line, as on real water
+        vec3 c = (texture2DProj(tDiffuse, at).rgb * 2.0 + texture2DProj(tDiffuse, at + vec4(0.0, soft, 0.0, 0.0)).rgb + texture2DProj(tDiffuse, at - vec4(0.0, soft, 0.0, 0.0)).rgb
+                + texture2DProj(tDiffuse, at + vec4(0.0, 2.2 * soft, 0.0, 0.0)).rgb * 0.5 + texture2DProj(tDiffuse, at - vec4(0.0, 2.2 * soft, 0.0, 0.0)).rgb * 0.5) / 5.0;
         float f = 0.06 + 0.94 * pow(1.0 - clamp(v.y, 0.0, 1.0), 4.0);
         gl_FragColor = vec4(mix(vec3(0.012, 0.024, 0.028), c, clamp(f + 0.32, 0.0, 1.0)), 1.0);
         #include <tonemapping_fragment>
@@ -757,11 +794,11 @@ export async function loadWorld(renderer, onProgress) {
   const sphere = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.25), roughness: 0.72, envMapIntensity: 0.45 }), { courses: true });
   const vault = weathered(std({ color: new THREE.Color(0.05, 0.05, 0.053), map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.88, dithering: true }), { courses: true, streaks: 0 });   // painted black, so the stars stand out
   const paving = weathered(std({ color: LIMESTONE, map: T('paving', true), normalMap: T('paving_n'), normalScale: nS(0.7) }), { streaks: 0 });
-  const gravel = weathered(std({ color: new THREE.Color(1.22, 1.08, 0.88), map: T('gravel', true), normalMap: T('gravel_n'), normalScale: nS(0.5), roughness: 0.94 }), { streaks: 0 });
+  const gravel = weathered(std({ color: new THREE.Color(1.22, 1.08, 0.88), map: T('gravel', true), normalMap: T('gravel_n'), normalScale: nS(0.3), roughness: 0.94 }), { streaks: 0, loose: true });
   const soil = std({ map: T('soil', true), roughness: 0.97 });
   const leaves = T('cypress', true);
   const foliage = new THREE.MeshLambertMaterial({ map: leaves, normalMap: T('cypress_n'), normalScale: nS(1.0), vertexColors: true,   // matte: leaves don't mirror the sky
-                                                  emissive: 0x3c4a40, emissiveMap: leaves });                                          // this material ignores the sky, so its light is added here
+                                                  emissive: 0x56665a, emissiveMap: leaves });                                          // this material ignores the sky, so its light is added here
   const grass = [T('grass', true), T('grass_n')];
   const MATS = {
     'Vault: pierced shell (star holes)': [vault, 12, true], Bore: [boreStone, 12 / SCALE], 'Limestone ashlar': [ashlar, 15.6 / SCALE], 'Limestone dressed': [dressed, 12 / SCALE], 'Limestone sphere': [sphere, 12, true],
@@ -835,7 +872,7 @@ export async function loadWorld(renderer, onProgress) {
     }
     const indoors = key.startsWith('Vault') || key === 'Bore' || name === 'Interior floor' || name.startsWith('Sarcophagus') || name === 'Passage stairs';
     if (indoors) mesh.layers.set(1);
-    if (key.startsWith('Vault')) vaults.push(mesh);                   // the basin's reflection is drawn without what it could never show
+    if (key.startsWith('Vault') || key === 'Bore') vaults.push(mesh);                   // the basin's reflection is drawn without what it could never show
     mesh.castShadow = !indoors && key !== 'Planting bed (soil, needle litter)' && name !== 'Esplanade and walks' && name !== 'Basin coping';   // low and flat, they would shadow only themselves, in stripes
     mesh.receiveShadow = true;
   }
@@ -918,8 +955,12 @@ export async function loadWorld(renderer, onProgress) {
   for (const o of shafts.mesh.children) o.layers.set(1);
   scene.add(shafts.mesh);
 
-  // the painted vault can be seen only from inside the shell or from the ways into it
-  const showVault = (on) => { for (const o of vaults) o.visible = on; figures.visible = on; };
+  // the painted vault and the bores' walls can be seen only from inside the shell or from the ways into it
+  // From outside, a pinhole shows only darkness: a plain black ball inside the shell stands in for the void.
+  const dark = new THREE.Mesh(new THREE.SphereGeometry(74.6, 48, 24).translate(0, CENTER.y, 0), new THREE.MeshBasicMaterial({ color: 0x030303, fog: false }));
+  dark.layers.set(1);
+  scene.add(dark);
+  const showVault = (on) => { for (const o of vaults) o.visible = on; figures.visible = on; dark.visible = !on; };
   return { scene, bvh, trees, showVault, water, sky, fire, visitors, sun, setSun, refresh, shadowsClose, lamps, shafts, tomb, sunStrength: () => sunStrength };
 
 }
