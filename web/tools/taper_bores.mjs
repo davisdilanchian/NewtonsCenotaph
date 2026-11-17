@@ -110,6 +110,21 @@ for (let v = 0; v < sp.getCount(); v++) {
   const g = land(w, p);
   sp.setElement(v, g.outer); w.b.moved.sphere++; w.b.rim.push(g.outer);
 }
+// The rim's baked light was the shade at the lip of a wide hole. Stretched in to the pinhole it would
+// streak the stone, so each rim vertex takes the light of the open stone it joins.
+const sc = sphere.getAttribute('COLOR_0'), sum = new Map(), col = [0, 0, 0, 0];
+for (let i = 0; i < idx.length; i += 3) for (let k = 0; k < 3; k++) {
+  const v = idx[i + k];
+  if (!hits[v]) continue;
+  for (const u of [idx[i + (k + 1) % 3], idx[i + (k + 2) % 3]]) {
+    if (hits[u]) continue;
+    sc.getElement(u, col);
+    const t = sum.get(v) ?? sum.set(v, [0, 0, 0, 0, 0]).get(v);
+    for (let j = 0; j < sc.getElementSize(); j++) t[j] += col[j]; t[4]++;
+  }
+}
+for (const [v, t] of sum) sc.setElement(v, t.slice(0, sc.getElementSize()).map((x) => x / t[4]));
+
 const bp = bore.getAttribute('POSITION'), bn = bore.getAttribute('NORMAL');
 let between = 0, unmatched = 0;
 for (let v = 0; v < bp.getCount(); v++) {
