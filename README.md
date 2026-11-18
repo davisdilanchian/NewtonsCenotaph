@@ -6,7 +6,7 @@ A to-scale 3D model of Étienne-Louis Boullée's *Cénotaphe de Newton* (1784), 
 
 The monument is its published 150 m, and the figures in the drawings measure about 130–180 m. Screens and games make large things look small, because a screen fills only a fraction of your view, so the page corrects for that with its camera: the walker, the visitors, the stone courses and the ground grain are drawn at a third of true size, which lowers the eye and slows the walk.
 
-On a phone, turn to look and walk for real to move: the page feels each step and keeps you walking at your own pace for as long as the steps come. It goes full screen where the browser allows; on an iPhone, add it to the home screen for that. Elsewhere: WASD to walk, Shift to run, Space to jump, mouse to look, Esc to free the cursor, 1–8 to jump between places, R to reset, hold T to run the sun, [ and ] to change the field of view, M to turn the music on or off, Q to set the picture quality by hand. Without motion sensors, the on-screen stick and drag still work.
+On a phone, turn to look and walk for real to move: the page feels each step and keeps you walking at your own pace for as long as the steps come. It goes full screen where the browser allows; on an iPhone, add it to the home screen for that. Elsewhere: WASD to walk, Shift to run, Space to jump, mouse to look, Esc to free the cursor, 1–8 to jump between places, R to reset, T to set the sun running and to stop it, [ and ] to change the field of view, M to turn the music on or off, Q to set the picture quality by hand. Without motion sensors, the on-screen stick and drag still work.
 
 ## Folder
 

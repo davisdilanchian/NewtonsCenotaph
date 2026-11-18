@@ -322,7 +322,8 @@ const timer = new THREE.Timer();
 function frame() {
   requestAnimationFrame(frame);
   timer.update();
-  if (!hold) tick(Math.min(timer.getDelta(), 0.05));
+  wall = Math.min(timer.getDelta(), 0.5);
+  if (!hold) tick(Math.min(wall, 0.05));
 }
 
 function simulate(dt) {
@@ -332,6 +333,7 @@ function simulate(dt) {
   player.update(dt, input);
 }
 
+let wall = 0, sunRuns = false;                  // the time really gone by since the last frame, and whether T has set the sun running
 function tick(dt, draw = true) {
   time += dt;
   if (started) simulate(dt);
@@ -340,7 +342,7 @@ function tick(dt, draw = true) {
 
   const p = player.pos;
   // the sun crosses the sky and back; holding T hurries it along
-  dayClock += dt * (keys.has('KeyT') ? 120 : 1) / DAY;
+  dayClock += (sunRuns ? Math.max(dt, wall) * 120 : dt) / DAY;   // by the clock, so a slow machine sees the same day
   const leg = dayClock % 2;
   world.setSun(leg < 1 ? leg : 2 - leg);
 
@@ -385,6 +387,7 @@ function bindControls() {
     if (e.code === 'Space') { input.jump = true; e.preventDefault(); }
     if (e.code === 'KeyR') teleport(0);
     if (e.code === 'KeyM') toggleMusic();
+    if (e.code === 'KeyT') { sunRuns = !sunRuns; $('whereNote').textContent = sunRuns ? 'The sun is running: a day in twenty seconds. T stops it' : 'The sun at its own pace again'; }
     if (e.code === 'KeyQ') cycleQuality();
     if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
       FOV = clamp(FOV + (e.code === 'BracketRight' ? 5 : -5), 35, 100);
