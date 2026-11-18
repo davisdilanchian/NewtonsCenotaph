@@ -877,8 +877,7 @@ export async function loadWorld(renderer, onProgress) {
   const ashlar = weathered(std({ color: LIMESTONE, map: T('ashlar', true), normalMap: T('ashlar_n'), normalScale: nS(0.9) }));
   const stone = T('stone', true), stoneN = T('stone_n');
   const dressed = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.5), roughness: 0.74 }), { streaks: 0.4 });
-  const hollow = std({ color: 0x1c1813, roughness: 0.95, envMapIntensity: 0.25 });
-  const cutLip = std({ color: 0x75694c, roughness: 0.85, envMapIntensity: 0.35 });
+  const hollow = new THREE.MeshBasicMaterial({ color: 0x0b0906 });
   const lionStone = weathered(std({ color: 0xefe3cc, map: stone, normalMap: stoneN, normalScale: nS(0.35), roughness: 0.66 }), { streaks: 0.6, carved: true });   // a finer, paler block, cut deep
   const boreStone = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.8 }), { streaks: 0, level: 1.5 });   // the bake's vertices are too few for these narrow bores
   const sphere = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.25), roughness: 0.72, envMapIntensity: 0.45 }), { courses: true });
@@ -924,7 +923,7 @@ export async function loadWorld(renderer, onProgress) {
     const key = mesh.material.name;
     if (name === 'Inscription') {
       // Cut into the wall, not set on it: the modelled letters stand proud, so they are pressed flat
-      // against the stone as the shadowed hollow of each cut, with its lit lower lip showing under it.
+      // against the stone as the shadowed hollow of each cut, dark whatever light the wall is in.
       const flat = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld), fp = flat.attributes.position, fn = flat.attributes.normal;
       let wall = Infinity;
       for (let i = 0; i < fp.count; i++) wall = Math.min(wall, Math.hypot(fp.getX(i), fp.getZ(i)));
@@ -933,10 +932,8 @@ export async function loadWorld(renderer, onProgress) {
         fp.setXYZ(i, x * k, fp.getY(i), z * k); fn.setXYZ(i, x / r, 0, z / r);
       }
       flat.deleteAttribute('color');
-      const cut = new THREE.Mesh(flat, hollow), lip = new THREE.Mesh(flat, cutLip);
-      lip.position.y = -0.035; lip.scale.set(0.99995, 1, 0.99995);
-      cut.receiveShadow = lip.receiveShadow = true;
-      scene.add(lip, cut);
+      const cut = new THREE.Mesh(flat, hollow);
+      scene.add(cut);
       mesh.visible = false;
     }
     if (MATS[key]) {
@@ -956,7 +953,7 @@ export async function loadWorld(renderer, onProgress) {
           // The wall behind the inscription has corners only at its head and foot, and the bake left one
           // bright patches at its head and foot, which its great faces drew out into wedges of light: it is
           // given the plain shade of a wall under an overhang instead, deepening toward the top.
-          if (wallHead && z > 90 && Math.abs(x) < 45 && y > 5 && Math.abs(Math.hypot(x, z) - 104) < 1.5) { r = g = b = 0.2 + 0.2 * (1 - smooth(5.5, 43, y)); }
+          if (wallHead && z > 90 && Math.abs(x) < 45 && y > 5 && Math.abs(Math.hypot(x, z) - 104) < 1.5) { r = g = b = 0.42 + 0.2 * (1 - smooth(5.5, 43, y)); }
           const most = open > 0.99 ? 0.7 / Math.max(g, 0.7) : 1;      // and no shade in the open is lit harder than the sky and the ground can light it
           r *= most; g *= most; b *= most;
           baked[v * 3] = Math.max(r * (1 + open * (SKY_FILL * 0.9 - 1)), least); baked[v * 3 + 1] = Math.max(g * (1 + open * (SKY_FILL - 1)), least); baked[v * 3 + 2] = Math.max(b * (1 + open * (SKY_FILL * 1.14 - 1)), least);
