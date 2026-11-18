@@ -24,8 +24,7 @@ On a phone, turn to look and walk for real to move: the page feels each step and
 | `scripts/make_web_textures.py` | Generates the page's tiling stone, ground and foliage textures |
 | `web/public/assets/constellations.json` | The painted figures on the vault, made by `web/tools/birth_sky.mjs` |
 | `web/public/assets/music/` | The page's music (see Sound) |
-| `web/public/assets/figures.webp` | The paper visitors, cut from engraved plates by `web/tools/figures/` (`recut.py` is the last pass: it trims away the ground and paper the first cut left) |
-| `web/tools/figures/mend.py` | Repairs two figures the cuts had damaged: a forehead taken for paper, and a pair of legs lost with their ground |
+| `web/public/assets/figures.webp` | The paper visitors, cut from the engraved plates by `web/tools/figures/`: `fetch.py` downloads the plates, `cutout.py` cuts each figure out of its plate (with the ground and trapped paper traced out by hand in `trace.json`), and `pack.py` prints them in one ink and packs the sheet |
 | `web/tools/taper_bores.mjs` | Narrows the vault's bores to pinholes on the outside in the page's `monument.glb`; `scripts/build_scene.py` cuts the same cones on a rebuild |
 | `web/` | The walkable page. `.github/workflows/pages.yml` builds and deploys it on every push to `web/` |
 | `docs/dimensions.json` | The dimensions and tree counts the last build used |

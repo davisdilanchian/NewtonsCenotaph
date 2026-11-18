@@ -1,11 +1,16 @@
-# Download the plates listed in plates.json from Wikimedia Commons, 960 px wide, as f<plate>.jpg.
+# Download the plates listed in plates.json from Wikimedia Commons as p<plate>.jpg: Commons' own 1920 px
+# rendering of each, or its 1280 px one where that is refused. It asks slowly; Commons turns away a client in a hurry.
 #   python3 -I tools/figures/fetch.py tools/figures <work dir>
-import json, sys, time, urllib.parse, urllib.request
+import json, sys, time, urllib.error, urllib.request
 src, out = sys.argv[1:]
 UA = 'NewtonsCenotaphResearch/1.0 (github.com/davisdilanchian/NewtonsCenotaph)'
 for n, p in json.load(open(f'{src}/plates.json')).items():
-    q = urllib.parse.urlencode({'action': 'query', 'titles': 'File:' + p['title'], 'prop': 'imageinfo', 'iiprop': 'url', 'iiurlwidth': 1600, 'format': 'json'})
-    page = next(iter(json.load(urllib.request.urlopen(urllib.request.Request('https://commons.wikimedia.org/w/api.php?' + q, headers={'User-Agent': UA})))['query']['pages'].values()))
-    data = urllib.request.urlopen(urllib.request.Request(page['imageinfo'][0]['thumburl'], headers={'User-Agent': UA})).read()
-    open(f'{out}/f{n}.jpg', 'wb').write(data)
-    time.sleep(0.5)
+    url = p['image'].split('?')[0].replace('/commons/', '/commons/thumb/')
+    for width in (1920, 1280):
+        try:
+            data = urllib.request.urlopen(urllib.request.Request(f"{url}/{width}px-{url.rsplit('/', 1)[1]}", headers={'User-Agent': UA})).read()
+            open(f'{out}/p{n}.jpg', 'wb').write(data); print(n, width, flush=True)
+            break
+        except urllib.error.HTTPError as e:
+            print(n, width, e.code, flush=True); time.sleep(20)
+    time.sleep(5)
