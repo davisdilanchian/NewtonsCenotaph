@@ -1,6 +1,7 @@
-# Mend two figures the cuts had damaged, in the sheet recut.py wrote: the forehead of the lady on plate 00,
-# which the first threshold took for paper, and the crossed legs of the gentleman on plate 03, lost with
-# the ground they stood on. The legs come back from the sheet as it was before recut.py.
+# Mend the figures the cuts had damaged, in the sheet recut.py wrote: the forehead of the lady on plate 00
+# and the brow and nose of the gentleman on plate 05, which the first threshold took for paper, and the
+# crossed legs of the gentleman on plate 03, lost with the ground they stood on. The legs come back from the sheet as it was before recut.py.
+# Run it once, on the sheet as recut.py left it.
 #   python3 -I tools/figures/mend.py <old figures.webp> <old figures.json> public/assets/figures
 import json, sys
 import numpy as np
@@ -23,21 +24,28 @@ def finish(fig):
     a[..., 3] = np.array(alpha)
     return Image.fromarray(a)
 
-# plate 00: the forehead, in the tone of her cheek, with the engraver's line down its front
-p = find(places, '00'); x0, y0, _, _ = box(p)
-fig = sheet.crop(box(p)); a = np.array(fig)
-skin = a[172:186, 232:246, :3].reshape(-1, 3).mean(0)
-brow = Image.new('L', fig.size, 0)
-ImageDraw.Draw(brow).polygon([(234, 141), (252, 133), (268, 141), (276, 150), (272, 159), (268, 169), (260, 169), (248, 166), (238, 161), (235, 150)], fill=255)
-brow = np.array(brow.filter(ImageFilter.GaussianBlur(0.8))) / 255.0
-rng = np.random.default_rng(3)
-tone = skin[None, None, :] + rng.normal(0, 2.2, a.shape[:2] + (1,))
-fill = brow[..., None] * (a[..., 3:4] < 200)
-a[..., :3] = (a[..., :3] * (1 - fill) + tone * fill).astype(np.uint8)
-a[..., 3] = np.maximum(a[..., 3], (brow * 255).astype(np.uint8))
-fig = Image.fromarray(a)
-ImageDraw.Draw(fig).line([(275, 150), (272, 159), (268, 168)], fill=(118, 106, 88, 255), width=1)
-sheet.paste(fig, (x0, y0))
+def paint(plate, outline, cheek, lines, light=85):
+    """Stone lost from a face: filled in the tone of the cheek beside it, with the engraver's line along its edge."""
+    p = find(places, plate); x0, y0, _, _ = box(p)
+    fig = sheet.crop(box(p)); a = np.array(fig)
+    cx, cy = cheek
+    skin = np.percentile(a[cy:cy + 12, cx:cx + 12, :3].reshape(-1, 3), light, axis=0)      # the bare paper of the skin, not the hatching on it
+    patch = Image.new('L', fig.size, 0)
+    ImageDraw.Draw(patch).polygon(outline, fill=255)
+    patch = np.array(patch.filter(ImageFilter.GaussianBlur(0.8))) / 255.0
+    tone = skin[None, None, :] + np.random.default_rng(3).normal(0, 2.2, a.shape[:2] + (1,))
+    fill = patch[..., None] * (a[..., 3:4] < 200)
+    a[..., :3] = (a[..., :3] * (1 - fill) + tone * fill).astype(np.uint8)
+    a[..., 3] = np.maximum(a[..., 3], (patch * 255).astype(np.uint8))
+    fig = Image.fromarray(a)
+    for line in lines: ImageDraw.Draw(fig).line(line, fill=(118, 106, 88, 255), width=1)
+    sheet.paste(fig, (x0, y0))
+
+# plate 00: her forehead
+paint('00', [(234, 141), (252, 133), (268, 141), (276, 150), (272, 159), (268, 169), (260, 169), (248, 166), (238, 161), (235, 150)], (232, 172), [[(275, 150), (272, 159), (268, 168)]], light=66)
+# plate 05: his brow, from the wig down to the eye, and the bridge of his nose
+paint('05', [(139, 19), (152, 27), (154, 46), (141, 57), (126, 58), (127, 50), (131, 36), (136, 24)], (140, 98), [[(137, 22), (131, 36), (127, 50), (125, 57)]])
+paint('05', [(128, 65), (122, 74), (114, 82), (111, 86), (119, 89), (126, 88), (128, 78), (131, 70)], (140, 98), [[(127, 66), (121, 75), (112, 85)]])
 
 # plate 03: his legs and shoes from the old sheet, traced by hand, without the ground round them
 po = find(old_places, '03'); fig = old.crop(box(po)); a = np.array(fig)
