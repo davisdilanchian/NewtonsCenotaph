@@ -18,7 +18,7 @@ export function makePost(renderer) {
   quad.frustumCulled = false;
   stage.add(quad);
   const pass = (fragmentShader, uniforms, extra = {}) => new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader, uniforms, depthTest: false, depthWrite: false, toneMapped: false, ...extra });
-  const image = (w, h, samples = 0, depthBuffer = false) => new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples, depthBuffer, magFilter: THREE.LinearFilter, minFilter: THREE.LinearFilter });
+  const image = (w, h, samples = 0, depthBuffer = false) => new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples, depthBuffer, stencilBuffer: depthBuffer, magFilter: THREE.LinearFilter, minFilter: THREE.LinearFilter });
 
   const target = image(2, 2, 4, true), levels = Array.from({ length: LEVELS }, () => image(2, 2));
   const src = { value: null }, texel = { value: new THREE.Vector2() }, first = { value: 0 };

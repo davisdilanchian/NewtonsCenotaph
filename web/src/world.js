@@ -877,7 +877,6 @@ export async function loadWorld(renderer, onProgress) {
   const ashlar = weathered(std({ color: LIMESTONE, map: T('ashlar', true), normalMap: T('ashlar_n'), normalScale: nS(0.9) }));
   const stone = T('stone', true), stoneN = T('stone_n');
   const dressed = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.5), roughness: 0.74 }), { streaks: 0.4 });
-  const hollow = new THREE.MeshBasicMaterial({ color: 0x0b0906 });
   const lionStone = weathered(std({ color: 0xefe3cc, map: stone, normalMap: stoneN, normalScale: nS(0.35), roughness: 0.66 }), { streaks: 0.6, carved: true });   // a finer, paler block, cut deep
   const boreStone = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.8 }), { streaks: 0, level: 1.5 });   // the bake's vertices are too few for these narrow bores
   const sphere = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.25), roughness: 0.72, envMapIntensity: 0.45 }), { courses: true });
@@ -922,18 +921,40 @@ export async function loadWorld(renderer, onProgress) {
     if (isHelper) { mesh.visible = false; continue; }
     const key = mesh.material.name;
     if (name === 'Inscription') {
-      // Cut into the wall, not set on it: the modelled letters stand proud, so they are pressed flat
-      // against the stone as the shadowed hollow of each cut, dark whatever light the wall is in.
-      const flat = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld), fp = flat.attributes.position, fn = flat.attributes.normal;
-      let wall = Infinity;
-      for (let i = 0; i < fp.count; i++) wall = Math.min(wall, Math.hypot(fp.getX(i), fp.getZ(i)));
-      for (let i = 0; i < fp.count; i++) {
-        const x = fp.getX(i), z = fp.getZ(i), r = Math.hypot(x, z), k = (wall + 0.012) / r;
-        fp.setXYZ(i, x * k, fp.getY(i), z * k); fn.setXYZ(i, x / r, 0, z / r);
+      // Cut into the wall. The modelled letters stand proud of it, so they are turned inside out: their
+      // faces become the mouths of the cuts, flush with the stone, and their sides and backs the walls
+      // and floors of the cuts, sunk into it. The mouths are drawn first, unseen, to mark where the wall
+      // is open; the hollows are then drawn only there, through the wall's surface, as through a window.
+      const src = (mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone()).applyMatrix4(mesh.matrixWorld), sp = src.attributes.position;
+      let wall = Infinity, proud = 0;
+      for (let i = 0; i < sp.count; i++) { const r = Math.hypot(sp.getX(i), sp.getZ(i)); wall = Math.min(wall, r); proud = Math.max(proud, r); }
+      const DEPTH = 0.13, mouths = [], hollows = [], shade = [];
+      for (let i = 0; i < sp.count; i += 3) {
+        let front = 0;
+        const tri = [];
+        for (let k = 0; k < 3; k++) {
+          const x = sp.getX(i + k), z = sp.getZ(i + k), r = Math.hypot(x, z), out = (r - wall) / (proud - wall);   // 1 on a letter's face, 0 on its back
+          if (out > 0.8) front++;
+          const sunk = (wall + 0.006 - DEPTH * (1 - out)) / r;
+          tri.push([x * sunk, sp.getY(i + k), z * sunk, 0.3 + 0.7 * out]);
+        }
+        // a cut is dark, darkest at its floor; the wall of it that looks up at the sky is a little lighter, the one that looks down darker
+        const ux = tri[1][0] - tri[0][0], uy = tri[1][1] - tri[0][1], uz = tri[1][2] - tri[0][2], vx = tri[2][0] - tri[0][0], vy = tri[2][1] - tri[0][1], vz = tri[2][2] - tri[0][2];
+        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, up = -ny / (Math.hypot(nx, ny, nz) || 1);   // the modelled side faces outward: the cut's wall faces the other way
+        const sky = 1 + 0.9 * Math.max(up, 0) - 0.45 * Math.max(-up, 0);
+        for (const [x, y, z, light] of tri) { (front === 3 ? mouths : hollows).push(x, y, z); if (front < 3) shade.push(light * sky, light * sky * 0.95, light * sky * 0.86); }
       }
-      flat.deleteAttribute('color');
-      const cut = new THREE.Mesh(flat, hollow);
-      scene.add(cut);
+      const mouthGeo = new THREE.BufferGeometry(), hollowGeo = new THREE.BufferGeometry();
+      mouthGeo.setAttribute('position', new THREE.Float32BufferAttribute(mouths, 3));
+      hollowGeo.setAttribute('position', new THREE.Float32BufferAttribute(hollows, 3));
+      hollowGeo.setAttribute('color', new THREE.Float32BufferAttribute(shade, 3));
+      const mouth = new THREE.Mesh(mouthGeo, new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, side: THREE.DoubleSide,
+        stencilWrite: true, stencilRef: 1, stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp }));
+      const cut = new THREE.Mesh(hollowGeo, new THREE.MeshBasicMaterial({ color: 0x2e271c, vertexColors: true, side: THREE.DoubleSide, depthTest: false, depthWrite: false,
+        stencilWrite: true, stencilRef: 1, stencilFunc: THREE.EqualStencilFunc }));
+      mouth.renderOrder = 5; cut.renderOrder = 6;    // after the wall they are cut in
+      mouth.layers.set(1); cut.layers.set(1);        // not in the basin's reflection, which keeps no such mark
+      scene.add(mouth, cut);
       mesh.visible = false;
     }
     if (MATS[key]) {

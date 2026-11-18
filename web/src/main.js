@@ -21,7 +21,7 @@ THREE.ShaderChunk.shadowmap_pars_fragment = THREE.ShaderChunk.shadowmap_pars_fra
 
 // the scene is drawn to a floating-point image where the machine allows, and smoothed there; otherwise straight to the screen
 const floats = !!document.createElement('canvas').getContext('webgl2')?.getExtension('EXT_color_buffer_float');
-const renderer = new THREE.WebGLRenderer({ antialias: !floats, reversedDepthBuffer: true, powerPreference: 'high-performance', preserveDrawingBuffer: debug });
+const renderer = new THREE.WebGLRenderer({ antialias: !floats, stencil: true, reversedDepthBuffer: true, powerPreference: 'high-performance', preserveDrawingBuffer: debug });
 
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
