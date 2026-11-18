@@ -131,7 +131,7 @@ function startPhoneSensors() {
   const listenTurn = () => addEventListener('deviceorientation', (e) => {
     if (e.alpha === null) return;
     Object.assign(gyro, { alpha: e.alpha, beta: e.beta, gamma: e.gamma });
-    if (!gyro.on) { gyro.on = gyro.align = true; $('phone').classList.add('on'); setTimeout(() => $('phone').classList.remove('on'), 7000); }
+    if (!gyro.on) { gyro.on = gyro.align = true; $('phone').classList.add('on'); setTimeout(() => $('phone').classList.remove('on'), 15000); }
   });
   const listenSteps = () => {
     let level = 9.8, smooth = 9.8, armed = true, last = 0;
@@ -175,7 +175,6 @@ function arrive(p) {
 
 function teleport(i) {
   arrive(PLACES[i]);
-  $('keys').classList.add('faded');
 }
 
 function show(p) { $('whereName').textContent = p.name; $('whereNote').textContent = p.note; }
@@ -394,7 +393,6 @@ function bindControls() {
     }
     const n = +e.key;
     if (n >= 1 && n <= PLACES.length) teleport(n - 1);
-    if (e.code.startsWith('Key') || e.code.startsWith('Arrow')) $('keys').classList.add('faded');
   });
   addEventListener('keyup', (e) => keys.delete(e.code));
   addEventListener('blur', () => keys.clear());
@@ -491,6 +489,7 @@ async function start() {
     $('intro').classList.add('gone');
     $('hud').classList.add('on');
     started = true;
+    setTimeout(() => $('keys').classList.add('faded'), 15000);   // the controls stay up for a quarter of a minute, whatever is pressed
     sound.start();
     if (touch) { fullScreen(); startPhoneSensors(); }
     else canvas.requestPointerLock?.()?.catch?.(() => {});
