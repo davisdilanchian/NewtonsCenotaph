@@ -8,6 +8,7 @@ import { Reflector } from './mirror.js';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
 import { noise3, rng, smooth, SCALE } from './util.js';
+import { makeBirds } from './birds.js';
 import { makeVisitors } from './visitors.js';
 import { makeSunshafts } from './sunshafts.js';
 
@@ -1113,6 +1114,8 @@ export async function loadWorld(renderer, onProgress) {
   const sky = makeSky(renderer, scene);
   sky.material.depthTest = false; sky.renderOrder = -1;   // it sits at the far plane, which the reversed depth buffer would put in front
   const fire = makeFire();
+  const birds = makeBirds();
+  outdoors.add(birds.mesh);
   scene.add(fire.group);
   const lamps = makeLamps(lampBuf);
   const sconces = makeSconces(lampBuf, bvh);
@@ -1190,6 +1193,6 @@ export async function loadWorld(renderer, onProgress) {
     visitors.meshes[2].visible = q.casts;            // their outlines on the ground
     refresh();
   };
-  return { loadDetail, scene, bvh, trees, showVault, setQuality, water, sky, fire, visitors, sun, setSun, refresh, shadowsClose, lamps, shafts, tomb, sunStrength: () => sunStrength };
+  return { loadDetail, birds, scene, bvh, trees, showVault, setQuality, water, sky, fire, visitors, sun, setSun, refresh, shadowsClose, lamps, shafts, tomb, sunStrength: () => sunStrength };
 
 }

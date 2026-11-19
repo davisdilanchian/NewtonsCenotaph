@@ -370,9 +370,11 @@ function tick(dt, draw = true) {
   world.water.material.uniforms.time.value = time;
   world.lamps.material.uniforms.t.value = time;
   world.shafts.scale.value = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+  world.birds.focal.value = world.shafts.scale.value;
   world.lamps.material.uniforms.scale.value = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
   world.sky.material.uniforms.time.value = time;
   world.fire.update(dt, time, camera);
+  world.birds.update(dt, time);
   world.visitors.update(dt, camera, { x: p.x, z: p.z, feet: player.feet });
 
   camera.updateMatrixWorld();
