@@ -33,8 +33,27 @@ const NOT_SOLID = new Set(['Main stair', 'Front stair block', 'Planting beds', '
 const STEPPED = new Set(['Main stair', 'Front stair block', 'Esplanade and walks', 'Sarcophagus dais', 'Passage stairs']);
 
 // ------------------------------------------------------------------ texturing
+// The normal maps are most of what the stone weighs, and nothing on the title screen shows them: they
+// are fetched once the rest is in, and until then the stone is flat.
+const detail = [];
+function flatNormal() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 1;
+  const x = c.getContext('2d');
+  x.fillStyle = 'rgb(128,128,255)'; x.fillRect(0, 0, 1, 1);
+  return c;
+}
+// Pictures are decoded away from the page, which would otherwise stop to decode each as it first drew it.
+const bitmaps = (manager) => new THREE.ImageBitmapLoader(manager).setOptions({ imageOrientation: 'flipY', premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+function picture(t, bitmap) { t.source = new THREE.Source(bitmap); t.flipY = false; t.needsUpdate = true; return t; }
+function loadDetail() {
+  const loader = bitmaps();
+  for (const [t, name] of detail.splice(0)) loader.load(`assets/tex/${name}.jpg`, (b) => picture(t, b));
+}
 function load(name, srgb, renderer, manager) {
-  const t = new THREE.TextureLoader(manager).load(`assets/tex/${name}.jpg`);
+  let t;
+  if (name.endsWith('_n')) { t = new THREE.Texture(flatNormal()); t.needsUpdate = true; detail.push([t, name]); }
+  else { t = new THREE.Texture(); t.flipY = false; bitmaps(manager).load(`assets/tex/${name}.webp`, (b) => picture(t, b)); }
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   if (srgb) t.colorSpace = THREE.SRGBColorSpace;
@@ -131,41 +150,94 @@ function lamplit(x, y, z) {
  * the glow thrown back off the other walls.
  */
 function lampLight(g, lamps) {
-  const names = Object.keys(g.attributes), src = names.map((k) => g.attributes[k]), out = names.map(() => []);
-  const P = names.indexOf('position'), pos = src[P], MAX = 0.9;
-  const corner = (i) => src.map((a) => { const v = []; for (let k = 0; k < a.itemSize; k++) v.push(a.array[i * a.itemSize + k]); return v; });
-  const mid = (a, b) => a.map((v, k) => v.map((x, j) => (x + b[k][j]) / 2));
-  const far = (a, b) => Math.hypot(a[P][0] - b[P][0], a[P][1] - b[P][1], a[P][2] - b[P][2]);
-  let cut = false;
-  for (let i = 0; i < pos.count; i += 3) {
-    const stack = [[corner(i), corner(i + 1), corner(i + 2)]];
-    while (stack.length) {
-      const [a, b, c] = stack.pop(), ab = far(a, b), bc = far(b, c), ca = far(c, a), longest = Math.max(ab, bc, ca);
-      const w = lamplit((a[P][0] + b[P][0] + c[P][0]) / 3, (a[P][1] + b[P][1] + c[P][1]) / 3, (a[P][2] + b[P][2] + c[P][2]) / 3);
-      if (w > 0 && longest > MAX && stack.length < 64) {
-        cut = true;
-        if (longest === ab) { const m = mid(a, b); stack.push([a, m, c], [m, b, c]); }
-        else if (longest === bc) { const m = mid(b, c); stack.push([a, b, m], [a, m, c]); }
-        else { const m = mid(c, a); stack.push([a, b, m], [m, b, c]); }
-      } else for (const v of [a, b, c]) v.forEach((x, k) => out[k].push(...x));
+  const names = Object.keys(g.attributes), src = names.map((k) => g.attributes[k]), sizes = src.map((a) => a.itemSize);
+  const P = names.indexOf('position'), pa = src[P].array, count = src[P].count, MAX = 0.9;
+  // The faces are written out again only once one has been cut, and those out of the lamps' reach, or
+  // already fine enough, are copied as they are.
+  let out = null, cap = 0, used = 0;
+  const reserve = (n) => {
+    if (out && used + n <= cap) return;
+    cap = Math.max(cap * 2, used + n, count * 2);
+    out = src.map((a, j) => { const to = new Float32Array(cap * sizes[j]); for (let k = 0, from = out ? out[j] : a.array; k < used * sizes[j]; k++) to[k] = from[k]; return to; });
+  };
+  const emit = (pool, S, at, v) => {
+    reserve(1);
+    for (let j = 0; j < sizes.length; j++) for (let k = 0, s = sizes[j]; k < s; k++) out[j][used * s + k] = pool[v * S + at[j] + k];
+    used++;
+  };
+  for (let t = 0; t < count / 3; t++) {
+    const o = t * 9, ab = Math.hypot(pa[o] - pa[o + 3], pa[o + 1] - pa[o + 4], pa[o + 2] - pa[o + 5]);
+    const bc = Math.hypot(pa[o + 3] - pa[o + 6], pa[o + 4] - pa[o + 7], pa[o + 5] - pa[o + 8]), ca = Math.hypot(pa[o + 6] - pa[o], pa[o + 7] - pa[o + 1], pa[o + 8] - pa[o + 2]);
+    if (Math.max(ab, bc, ca) > MAX && lamplit((pa[o] + pa[o + 3] + pa[o + 6]) / 3, (pa[o + 1] + pa[o + 4] + pa[o + 7]) / 3, (pa[o + 2] + pa[o + 5] + pa[o + 8]) / 3) > 0) { cutFace(src, P, t * 3, MAX, emit); continue; }
+    if (out) {
+      reserve(3);
+      for (let j = 0; j < sizes.length; j++) { const s = sizes[j], from = src[j].array, to = out[j]; for (let k = 0; k < 3 * s; k++) to[used * s + k] = from[t * 3 * s + k]; }
     }
+    used += 3;
   }
-  if (cut) names.forEach((k, j) => g.setAttribute(k, new THREE.BufferAttribute(new Float32Array(out[j]), src[j].itemSize)));
-  const p = g.attributes.position, n = g.attributes.normal, baked = g.attributes.baked;
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i), y = p.getY(i), z = p.getZ(i), w = lamplit(x, y, z);
+  if (out) names.forEach((k, j) => g.setAttribute(k, new THREE.BufferAttribute(out[j].slice(0, used * sizes[j]), sizes[j])));
+
+  const p = g.attributes.position.array, n = g.attributes.normal, baked = g.attributes.baked.array, near = lampsNear(lamps);
+  for (let i = 0; i < used; i++) {
+    const x = p[i * 3], y = p[i * 3 + 1], z = p[i * 3 + 2], w = lamplit(x, y, z);
     if (w === 0) continue;
     let e = 0;
-    for (let l = 0; l < lamps.length; l += 3) {
+    for (const l of near(x, y, z)) {
       const dx = lamps[l] - x, dy = lamps[l + 1] - y, dz = lamps[l + 2] - z, d2 = dx * dx + dy * dy + dz * dz;
       if (d2 > 400) continue;
       const d = Math.sqrt(d2), facing = Math.max(0, (n.getX(i) * dx + n.getY(i) * dy + n.getZ(i) * dz) / d), reach = 1 - smooth(12, 20, d);
       e += LAMP * reach * (facing + 0.22) / (d2 + 0.6);
     }
-    baked.setXYZ(i, baked.getX(i) * (1 - w) + e * w, baked.getY(i) * (1 - w) + e * 0.6 * w, baked.getZ(i) * (1 - w) + e * 0.27 * w);
+    baked[i * 3] = baked[i * 3] * (1 - w) + e * w; baked[i * 3 + 1] = baked[i * 3 + 1] * (1 - w) + e * 0.6 * w; baked[i * 3 + 2] = baked[i * 3 + 2] * (1 - w) + e * 0.27 * w;
   }
 }
-const LAMP = 5.5;                             // a lamp's strength, set so the stone a stride from it glows and the far end of its reach stays dim
+/** The lamps that can reach somewhere, found by the 20 m box it lies in: each box knows its own, in order. */
+const lampBoxes = new WeakMap();
+function lampsNear(lamps) {
+  if (lampBoxes.has(lamps)) return lampBoxes.get(lamps);
+  const boxes = new Map(), R = 20;
+  const near = (x, y, z) => {
+    const ix = Math.floor(x / R), iy = Math.floor(y / R), iz = Math.floor(z / R), key = ((ix + 512) * 1024 + iy + 512) * 1024 + iz + 512;
+    let list = boxes.get(key);
+    if (!list) {
+      list = [];
+      for (let l = 0; l < lamps.length; l += 3) {
+        const gap = (v, i) => Math.max(i * R - v, 0, v - (i + 1) * R);
+        if (gap(lamps[l], ix) ** 2 + gap(lamps[l + 1], iy) ** 2 + gap(lamps[l + 2], iz) ** 2 <= R * R) list.push(l);
+      }
+      boxes.set(key, list);
+    }
+    return list;
+  };
+  lampBoxes.set(lamps, near);
+  return near;
+}
+/** A face in the lamps' light, halved across its longest edge until no edge is longer than max; each corner is handed to emit. */
+function cutFace(src, P, i, max, emit) {
+  const sizes = src.map((a) => a.itemSize), S = sizes.reduce((s, n) => s + n, 0), at = [];
+  sizes.reduce((o, n) => (at.push(o), o + n), 0);
+  const p = at[P];
+  let pool = new Float64Array(S * 64), used = 0;
+  const corner = (v) => { src.forEach((a, j) => { for (let k = 0; k < sizes[j]; k++) pool[used * S + at[j] + k] = a.array[v * sizes[j] + k]; }); return used++; };
+  const mid = (a, b) => {
+    if ((used + 1) * S > pool.length) { const grown = new Float64Array(pool.length * 2); grown.set(pool); pool = grown; }
+    for (let k = 0; k < S; k++) pool[used * S + k] = (pool[a * S + k] + pool[b * S + k]) / 2;
+    return used++;
+  };
+  const far = (a, b) => Math.hypot(pool[a * S + p] - pool[b * S + p], pool[a * S + p + 1] - pool[b * S + p + 1], pool[a * S + p + 2] - pool[b * S + p + 2]);
+  const along = (a, b, c, k) => (pool[a * S + p + k] + pool[b * S + p + k] + pool[c * S + p + k]) / 3;
+  const stack = [corner(i), corner(i + 1), corner(i + 2)];
+  while (stack.length) {
+    const c = stack.pop(), b = stack.pop(), a = stack.pop(), ab = far(a, b), bc = far(b, c), ca = far(c, a), longest = Math.max(ab, bc, ca);
+    const w = lamplit(along(a, b, c, 0), along(a, b, c, 1), along(a, b, c, 2));
+    if (w > 0 && longest > max && stack.length < 64 * 3) {
+      if (longest === ab) { const m = mid(a, b); stack.push(a, m, c, m, b, c); }
+      else if (longest === bc) { const m = mid(b, c); stack.push(a, b, m, a, m, c); }
+      else { const m = mid(c, a); stack.push(a, b, m, m, b, c); }
+    } else { emit(pool, S, at, a); emit(pool, S, at, b); emit(pool, S, at, c); }
+  }
+}
+const LAMP = 5.5;                            // a lamp's strength, set so the stone a stride from it glows and the far end of its reach stays dim
 
 /** World-scale UVs per triangle: courses wrap around the rings, flat tops are laid out in plan. */
 function stoneUVs(source, tile, sphere) {
@@ -899,7 +971,7 @@ export async function loadWorld(renderer, onProgress) {
   const json = new THREE.FileLoader(manager).setResponseType('json');
   const [gltf, treeBuf, holeBuf, lampBuf, figureList, figureSheet, figurePlaces] = await Promise.all([gltfLoader.loadAsync('assets/monument.glb'), fileLoader.loadAsync('assets/trees.bin'),
     fileLoader.loadAsync('assets/holes.bin'), fileLoader.loadAsync('assets/lamps.bin'), json.loadAsync('assets/constellations.json'),
-    new THREE.TextureLoader(manager).loadAsync('assets/figures.webp'), json.loadAsync('assets/figures.json')]);
+    bitmaps(manager).loadAsync('assets/figures.webp').then((b) => picture(new THREE.Texture(), b)), json.loadAsync('assets/figures.json')]);
   draco.dispose();
 
   const root = gltf.scene, solids = [];
@@ -1118,6 +1190,6 @@ export async function loadWorld(renderer, onProgress) {
     visitors.meshes[2].visible = q.casts;            // their outlines on the ground
     refresh();
   };
-  return { scene, bvh, trees, showVault, setQuality, water, sky, fire, visitors, sun, setSun, refresh, shadowsClose, lamps, shafts, tomb, sunStrength: () => sunStrength };
+  return { loadDetail, scene, bvh, trees, showVault, setQuality, water, sky, fire, visitors, sun, setSun, refresh, shadowsClose, lamps, shafts, tomb, sunStrength: () => sunStrength };
 
 }

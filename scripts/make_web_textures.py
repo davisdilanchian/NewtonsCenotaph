@@ -1,5 +1,6 @@
 """
-Tiling stone, ground and foliage textures for the web page, as JPEG colour + normal.
+Tiling stone, ground and foliage textures for the web page: colour as WebP (needs cwebp, from Homebrew's webp),
+normal maps as JPEG, which the page fetches after the rest.
 Noise is built in frequency space, so every texture wraps seamlessly.
 
   /Applications/Blender.app/Contents/Resources/5.0/python/bin/python3.11 scripts/make_web_textures.py
@@ -50,10 +51,14 @@ def write(name, rgb):
     with open(png, "wb") as f:
         f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) +
                 chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
-    subprocess.run(["sips", "-s", "format", "jpeg", "-s", "formatOptions", str(q), png,
-                    "--out", os.path.join(OUT, name + ".jpg")], check=True, capture_output=True)
+    if name.endswith("_n"):
+        out = os.path.join(OUT, name + ".jpg")
+        subprocess.run(["sips", "-s", "format", "jpeg", "-s", "formatOptions", str(q), png, "--out", out], check=True, capture_output=True)
+    else:
+        out = os.path.join(OUT, name + ".webp")
+        subprocess.run(["cwebp", "-quiet", "-q", "82", "-m", "6", "-sharp_yuv", png, "-o", out], check=True, capture_output=True)
     os.remove(png)
-    print(name, os.path.getsize(os.path.join(OUT, name + ".jpg")) // 1024, "KB")
+    print(name, os.path.getsize(out) // 1024, "KB")
 
 
 def tint(base, amount):

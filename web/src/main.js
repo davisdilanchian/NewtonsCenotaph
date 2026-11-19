@@ -68,10 +68,14 @@ const SHEETS = [
   { file: 'interior', name: 'Interior', alt: 'The starry vault seen from inside, with tiny figures at the sarcophagus' },
 ];
 let sheetTimer = 0;
+// Only the drawing on show is fetched while the cenotaph loads; the others follow once it has.
+const fetchSheet = (img) => { if (!img.src) img.src = img.dataset.src; };
+const sheetsLater = () => document.querySelectorAll('#sheet img').forEach(fetchSheet);
 
 function showSheets() {
   const pictures = [], thumbs = [];
   const pick = (n) => {
+    fetchSheet(pictures[n]);
     pictures.forEach((img, i) => img.classList.toggle('on', i === n));
     thumbs.forEach((b, i) => b.setAttribute('aria-pressed', i === n));
     $('sheetName').textContent = SHEETS[n].name;
@@ -79,13 +83,13 @@ function showSheets() {
   };
   let current = 0;
   SHEETS.forEach((s, i) => {
-    const src = `assets/sheets/${s.file}.jpg`;
     const img = new Image();
-    img.src = src; img.alt = s.alt;
+    img.alt = s.alt;
+    img.dataset.src = `assets/sheets/${s.file}.jpg`;
     $('sheet').append(img); pictures.push(img);
     const b = document.createElement('button');
     b.setAttribute('aria-label', s.name);
-    b.innerHTML = `<img src="${src}" alt="">`;
+    b.innerHTML = `<img src="assets/sheets/small/${s.file}.webp" alt="">`;
     b.addEventListener('click', () => { clearInterval(sheetTimer); pick(i); });
     $('thumbs').append(b); thumbs.push(b);
   });
@@ -473,7 +477,7 @@ async function start() {
   renderer.shadowMap.needsUpdate = true;
   setQuality(quality);
   renderer.setRenderTarget(post.on ? post.target : null);
-  renderer.compile(world.scene, camera);
+  await renderer.compileAsync(world.scene, camera);
   updateCamera(0.016);
   camera.updateMatrixWorld();
   world.trees.update(camera, player.pos.x, player.pos.z, TREES_NEAR, false);
@@ -483,6 +487,8 @@ async function start() {
     hold: (on) => { hold = on; }, setDay: (u) => { dayClock = u; } };
   frame();
 
+  world.loadDetail();
+  sheetsLater();
   $('bar').style.display = 'none';
   const enter = $('enter');
   enter.hidden = false;
