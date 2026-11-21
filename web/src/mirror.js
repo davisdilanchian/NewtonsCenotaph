@@ -1,5 +1,6 @@
 // three.js's Reflector (MIT) with a clipping plane in place of its oblique near plane, which assumes a
 // standard depth range and empties the reflection under the reversed depth buffer.
+import { SHADE } from './util.js';
 import {
 	Color,
 	Matrix4,
@@ -188,7 +189,10 @@ class Reflector extends Mesh {
 			if ( renderer.autoClear === false ) renderer.clear();
 			const planes = renderer.clippingPlanes;
 			renderer.clippingPlanes = [ surface.setFromNormalAndCoplanarPoint( normal, reflectorWorldPosition ) ];
+			const shading = SHADE.on.value;
+			SHADE.on.value = 0;            // the measured shade is for the eye's picture, not this one
 			renderer.render( scene, reflectionCamera );
+			SHADE.on.value = shading;
 			renderer.clippingPlanes = planes;
 
 			renderer.xr.enabled = currentXrEnabled;

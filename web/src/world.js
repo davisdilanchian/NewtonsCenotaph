@@ -7,7 +7,7 @@ import { Sky } from 'three/addons/objects/Sky.js';
 import { Reflector } from './mirror.js';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
-import { noise3, rng, smooth, SCALE } from './util.js';
+import { noise3, rng, smooth, SCALE, SHADE, OCCLUDERS } from './util.js';
 import { makeBirds } from './birds.js';
 import { makeVisitors } from './visitors.js';
 import { makeSunshafts } from './sunshafts.js';
@@ -90,23 +90,37 @@ function load(name, srgb, renderer, manager) {
 }
 
 const SKY_LEVEL = { value: 1 };                 // follows the height of the sun
+const GRAIN = { value: 10 };                    // octaves of the stone's grain: the finest are the first to go on a weaker machine
 
-/** Weather that repeats nowhere: broad tonal drift, rain streaks, and the sphere's stone courses. */
-function weathered(mat, { streaks = 1, courses = false, level = 1, loose = false, carved = false, turn = false } = {}) {
+/** Dims a material's light from the sky, not the sun's, where the picture's corners hide the sky (post.js). */
+function skyShade(s) {
+  s.uniforms.shadeMap = SHADE.map; s.uniforms.shadeTexel = SHADE.texel; s.uniforms.shadeOn = SHADE.on;
+  s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D shadeMap; uniform vec2 shadeTexel; uniform float shadeOn;')
+    .replace('#include <aomap_fragment>', `#include <aomap_fragment>
+      if (shadeOn > 0.5) { float open = texture2D(shadeMap, gl_FragCoord.xy * shadeTexel).r; reflectedLight.indirectDiffuse *= open; reflectedLight.indirectSpecular *= open; }`);
+}
+const shaded = (mat) => { mat.onBeforeCompile = skyShade; return mat; };
+
+/**
+ * Weather that repeats nowhere: broad tonal drift, rain streaks, and the sphere's stone courses. With
+ * `grain`, the stone's whole face is made here, from the world's own coordinates, so it neither repeats
+ * nor stretches however the model's surfaces were unwrapped: at 1 in place of a picture, below 1 over
+ * one (the jointed ashlar and paving), to break up its repeat.
+ */
+function weathered(mat, { streaks = 1, courses = false, level = 1, loose = false, carved = false, grain = 0.6 } = {}) {
   mat.onBeforeCompile = (s) => {
-    s.uniforms.skyLevel = SKY_LEVEL;
+    skyShade(s);
+    s.uniforms.skyLevel = SKY_LEVEL; s.uniforms.grainOctaves = GRAIN;
     s.vertexShader = s.vertexShader.replace('#include <common>', `#include <common>\nvarying vec3 vWP, vBaked; attribute vec3 baked;${carved ? ' attribute float cavity; varying float vCavity;' : ''}`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>\nvWP = (modelMatrix * vec4(position, 1.0)).xyz; vBaked = baked;${carved ? ' vCavity = cavity;' : ''}`);
     s.fragmentShader = s.fragmentShader.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
-      {   // the stone's own grain: pitted and uneven at a hand's scale, as limestone is, gone by a hundred metres
-        float near = 1.0 - smoothstep(25.0, 110.0, length(vViewPosition));
-        if (near > 0.0) {
-          float h = 0.55 * vn(vWP * 2.6) + 0.3 * vn(vWP * 7.3 + 3.1) + 0.15 * vn(vWP * 19.0 + 7.7);
-          vec3 sx = dFdx(-vViewPosition), sy = dFdy(-vViewPosition), r1 = cross(sy, normal), r2 = cross(normal, sx);
-          float det = dot(sx, r1) * faceDirection;
-          normal = normalize(abs(det) * normal - sign(det) * (dFdx(h) * r1 + dFdy(h) * r2) * 0.035 * near);
-        }
-      }`)
+      #if ${grain > 0 ? 1 : 0}
+      {   // the grain's relief, in metres, lit as a surface: what makes the stone read as rough in a low sun
+        vec3 sx = dFdx(-vViewPosition), sy = dFdy(-vViewPosition), r1 = cross(sy, normal), r2 = cross(normal, sx);
+        float det = dot(sx, r1) * faceDirection;
+        normal = normalize(abs(det) * normal - sign(det) * (dFdx(grainHeight) * r1 + dFdy(grainHeight) * r2) * ${Math.min(1, grain + 0.3).toFixed(2)});
+      }
+      #endif`)
       .replace('#include <lights_fragment_maps>', `#include <lights_fragment_maps>
       #ifdef USE_ENVMAP
         iblIrradiance = vec3(0.0);                    // diffuse sky comes from the path traced bake instead
@@ -115,22 +129,43 @@ function weathered(mat, { streaks = 1, courses = false, level = 1, loose = false
       vec3 bake = vBaked; float bakeL = dot(bake, vec3(0.3, 0.59, 0.11)), cool = clamp((bake.b - bake.r) / max(bakeL, 1e-4) * 3.0, 0.0, 1.0);
       irradiance += mix(bake, vec3(bakeL), 0.7 * cool) * skyLevel * ${level.toFixed(3)};   // the sky's light in the bake, half its blue: shade is cool, not navy; the lamps' warmth is kept`)
       .replace('#include <common>', `#include <common>
-      varying vec3 vWP, vBaked; uniform float skyLevel;${carved ? ' varying float vCavity;' : ''}
+      varying vec3 vWP, vBaked; uniform float skyLevel; uniform int grainOctaves;${carved ? ' varying float vCavity;' : ''}
       float vh(vec3 p) { p = fract(p * 0.3183 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
       float vn(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         return mix(mix(mix(vh(i), vh(i + vec3(1, 0, 0)), f.x), mix(vh(i + vec3(0, 1, 0)), vh(i + vec3(1, 1, 0)), f.x), f.y),
                    mix(mix(vh(i + vec3(0, 0, 1)), vh(i + vec3(1, 0, 1)), f.x), mix(vh(i + vec3(0, 1, 1)), vh(i + vec3(1, 1, 1)), f.x), f.y), f.z); }
-      float fb(vec3 p) { return 0.55 * vn(p) + 0.3 * vn(p * 2.1 + 3.1) + 0.15 * vn(p * 4.3 + 7.7); }`)
-      .replace('#include <map_fragment>', `#include <map_fragment>
+      float fb(vec3 p) { return 0.55 * vn(p) + 0.3 * vn(p * 2.1 + 3.1) + 0.15 * vn(p * 4.3 + 7.7); }
+      // The grain: ten octaves of noise, each turned against the last so none lines up with the axes.
+      // The first few mottle the tone over a few metres, the middle ones stain it in patches, the rest are
+      // a sandy grain with pits in it, and its relief. Each octave gives way to its mean as it shrinks
+      // below a pixel, so none glitters.
+      float grainTone = 1.0, grainHeight = 0.0;
+      void grainAt(vec3 p) {
+        const mat3 turn = mat3(0.0, 0.8, 0.6, -0.8, 0.36, -0.48, -0.6, -0.48, 0.64);
+        float px = max(max(length(dFdx(p)), length(dFdy(p))), 1e-5), f = 0.7, tone = 0.0, h = 0.0;
+        vec3 q = p * f;
+        for (int i = 0; i < 10; i++) {
+          float fade = 1.0 - smoothstep(0.25, 0.5, f * px);
+          if (fade <= 0.0 || i >= grainOctaves) break;
+          float n = (vn(q) - 0.5) * fade, m = i >= 2 && i < 5 ? (smoothstep(-0.28, 0.28, n) - 0.5) * 0.7 : n;   // the middle sizes firmer-edged, as weathering is: patches, not blurs
+          tone += m * (i < 2 ? 0.1 : i < 5 ? 0.08 : 0.5);
+          if (i >= 4) h += n * (i < 5 ? 0.04 : 0.1) / f;
+          q = turn * q * 2.03 + 1.7; f *= 2.03;
+        }
+        // pits: a few cells in each small cube of stone hold one, round, at a place of its own
+        float pf = 34.0, fade = 1.0 - smoothstep(0.1, 0.3, pf * px), pit = 0.0;
+        if (fade > 0.0) {
+          vec3 c = floor(p * pf), o = fract(p * pf) - 0.5 - 0.3 * (vec3(vh(c + 3.1), vh(c + 5.7), vh(c + 9.2)) - 0.5);
+          pit = step(0.86, vh(c)) * (1.0 - smoothstep(0.12, 0.3, length(o))) * fade;
+        }
+        grainTone = 1.0 + tone - 0.3 * pit - 0.01 * (1.0 - fade);
+        grainHeight = h - pit * 0.004;
+      }`)
+      .replace('#include <map_fragment>', `${grain >= 1 ? 'diffuseColor.rgb *= vec3(0.529, 0.468, 0.352);   // the old stone picture\'s mean colour' : ''}
+      #include <map_fragment>
+      ${grain > 0 ? `grainAt(vWP); diffuseColor.rgb *= mix(1.0, grainTone, ${Math.min(1, grain).toFixed(2)});` : ''}
       ${loose ? `vec3 again = texture2D(map, mat2(0.8, 0.6, -0.6, 0.8) * vMapUv * 0.231 + 0.37).rgb;   // the same gravel turned and far larger, so no tile repeats
       diffuseColor.rgb = mix(diffuseColor.rgb, diffuse * again, 0.5) * (0.9 + 0.2 * fb(vWP * 0.9));` : ''}
-      #if defined(USE_MAP) && ${turn ? 1 : 0}
-        // the same texture again, turned and at nearly three times the size, laid over it in drifting
-        // patches: no tile lines up with the next, so the repeat can't be picked out. Only for plain stone:
-        // turned, the joints of ashlar or paving would cross their own courses
-        vec3 turned = diffuse * texture2D(map, mat2(0.72, 0.69, -0.69, 0.72) * vMapUv * 0.37 + vec2(0.31, 0.17)).rgb;
-        diffuseColor.rgb = mix(diffuseColor.rgb, turned, smoothstep(0.3, 0.7, vn(vWP * 0.045)) * 0.6);
-      #endif
       diffuseColor.rgb = mix(vec3(dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11))), diffuseColor.rgb, 0.35) * 1.08;   // limestone is nearly white, its warmth light
       diffuseColor.rgb *= 0.8 + 0.3 * fb(vWP * 0.016) + 0.1 * fb(vWP * 0.13);
       ${carved ? `float hollow = clamp(vCavity, 0.0, 1.0), proud = clamp(-vCavity, 0.0, 1.0);          // carving: grime gathers in the cuts, and weather pales what stands proud
@@ -703,6 +738,7 @@ function makeGround(grassMap, grassNormal) {
   // a second, much larger sampling hides the tiling at a distance, and the meadow is no lawn: it
   // drifts between lush and dry in patches a few strides across and in long sweeps
   mat.onBeforeCompile = (s) => {
+    skyShade(s);
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vField;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvField = position.xz;');
     s.fragmentShader = s.fragmentShader.replace('#include <common>', `#include <common>
@@ -854,7 +890,7 @@ function makeFigures(list) {
   const atlas = new THREE.CanvasTexture(canvas);
   atlas.colorSpace = THREE.SRGBColorSpace; atlas.anisotropy = 4;
   // gilt: thin gold leaf, dim against the black paint, catching a glint here and there as you move
-  const paint = weathered(new THREE.MeshStandardMaterial({ color: new THREE.Color(0.85, 0.55, 0.16), map: atlas, alphaTest: 0.35, roughness: 0.6, metalness: 0 }), { streaks: 0, level: 0.35 });
+  const paint = weathered(new THREE.MeshStandardMaterial({ color: new THREE.Color(0.85, 0.55, 0.16), map: atlas, alphaTest: 0.35, roughness: 0.6, metalness: 0 }), { streaks: 0, level: 0.35, grain: 0 });
   const painted = paint.onBeforeCompile;
   paint.onBeforeCompile = (s) => {
     painted(s);
@@ -1028,15 +1064,15 @@ export async function loadWorld(renderer, onProgress) {
   const LIMESTONE = 0xfbf3ef;      // warms and tones down the neutral stone textures
   const nS = (v) => new THREE.Vector2(v, v);
   const ashlar = weathered(std({ color: LIMESTONE, map: T('ashlar', true), normalMap: T('ashlar_n'), normalScale: nS(0.9) }));
-  const stone = T('stone', true), stoneN = T('stone_n');
-  const dressed = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.5), roughness: 0.9 }), { streaks: 0.4, turn: true });
-  const lionStone = weathered(std({ color: 0xefe3cc, map: stone, normalMap: stoneN, normalScale: nS(0.35), roughness: 0.66 }), { streaks: 0.6, carved: true, turn: true });   // a finer, paler block, cut deep
-  const boreStone = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.8 }), { streaks: 0, level: 1.5, turn: true });   // the bake's vertices are too few for these narrow bores
-  const sphere = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.25), roughness: 0.9, envMapIntensity: 0.45 }), { courses: true, turn: true });
-  const vault = weathered(std({ color: new THREE.Color(0.05, 0.05, 0.053), map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.88, dithering: true }), { courses: true, streaks: 0 });   // painted black, so the stars stand out
+  // the plain stone has no picture: its face is made in the shader (weathered, grain)
+  const dressed = weathered(std({ color: LIMESTONE, roughness: 0.9 }), { streaks: 0.4, grain: 1 });
+  const lionStone = weathered(std({ color: 0xefe3cc, roughness: 0.66 }), { streaks: 0.6, carved: true, grain: 1 });   // a finer, paler block, cut deep
+  const boreStone = weathered(std({ color: LIMESTONE, roughness: 0.8 }), { streaks: 0, level: 1.5, grain: 1 });   // the bake's vertices are too few for these narrow bores
+  const sphere = weathered(std({ color: LIMESTONE, roughness: 0.9, envMapIntensity: 0.45 }), { courses: true, grain: 1 });
+  const vault = weathered(std({ color: new THREE.Color(0.05, 0.05, 0.053), roughness: 0.88, dithering: true }), { courses: true, streaks: 0, grain: 1 });   // painted black, so the stars stand out
   const paving = weathered(std({ color: LIMESTONE, map: T('paving', true), normalMap: T('paving_n'), normalScale: nS(0.7) }), { streaks: 0 });
-  const gravel = weathered(std({ color: new THREE.Color(1.22, 1.08, 0.88), map: T('gravel', true), normalMap: T('gravel_n'), normalScale: nS(0.3), roughness: 0.94 }), { streaks: 0, loose: true });
-  const soil = std({ map: T('soil', true), roughness: 0.97 });
+  const gravel = weathered(std({ color: new THREE.Color(1.22, 1.08, 0.88), map: T('gravel', true), normalMap: T('gravel_n'), normalScale: nS(0.3), roughness: 0.94 }), { streaks: 0, loose: true, grain: 0.3 });
+  const soil = shaded(std({ map: T('soil', true), roughness: 0.97 }));
   const leaves = T('cypress', true);
   const foliage = new THREE.MeshLambertMaterial({ map: leaves, normalMap: T('cypress_n'), normalScale: nS(1.0), vertexColors: true,   // matte: leaves don't mirror the sky
                                                   emissive: 0x55503c, emissiveMap: leaves });                                          // this material ignores the sky, so its light is added here
@@ -1276,6 +1312,7 @@ export async function loadWorld(renderer, onProgress) {
   scene.add(dark);
   const showVault = (on) => { for (const o of vaults) o.visible = on; figures.visible = on; dark.visible = !on; };
   const setQuality = (q) => {
+    GRAIN.value = q.glow ? 10 : 7;
     if (sun.shadow.mapSize.x !== q.shadow) { sun.shadow.mapSize.setScalar(q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
     water.visible = q.mirror > 0; stillWater.visible = !water.visible;
     if (q.mirror) water.getRenderTarget().setSize(q.mirror, q.mirror);
@@ -1283,6 +1320,8 @@ export async function loadWorld(renderer, onProgress) {
     visitors.meshes[2].visible = q.casts;            // their outlines on the ground
     refresh();
   };
+  // what the shade in corners is measured from: the stone and the ground, solid and lit as stone
+  scene.traverse((o) => { if (o.isMesh && !o.isInstancedMesh && !o.isSkinnedMesh && o.material.isMeshStandardMaterial && !o.material.alphaTest && !o.material.transparent) o.layers.enable(OCCLUDERS); });
   return { loadDetail, birds, scene, bvh, trees, showVault, setQuality, water, sky, fire, visitors, sun, setSun, refresh, shadowsClose, lamps, shafts, tomb, sunStrength: () => sunStrength };
 
 }

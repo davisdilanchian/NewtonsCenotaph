@@ -1,4 +1,5 @@
 // Small shared helpers.
+import * as THREE from 'three';
 export const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 export const lerp = (a, b, t) => a + (b - a) * t;
 export const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -24,3 +25,9 @@ export function noise3(x, y, z) {
   return lerp(lerp(lerp(c(0, 0, 0), c(1, 0, 0), u), lerp(c(0, 1, 0), c(1, 1, 0), u), v),
               lerp(lerp(c(0, 0, 1), c(1, 0, 1), u), lerp(c(0, 1, 1), c(1, 1, 1), u), v), w);
 }
+
+// How open to the sky each pixel of the picture is, measured from the depth of the stone and ground
+// before they are drawn (post.js), and read by them as they are drawn, so it dims the sky's light in
+// corners and leaves the sun's alone. While it is off, or for a reflection, it reads as fully open.
+export const SHADE = { map: { value: null }, texel: { value: new THREE.Vector2(1, 1) }, on: { value: 0 } };
+export const OCCLUDERS = 2;                       // the layer of what is measured for it

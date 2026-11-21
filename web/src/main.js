@@ -485,7 +485,7 @@ async function start() {
   world.trees.update(camera, player.pos.x, player.pos.z, TREES_NEAR, false);
   post.render(world.scene, camera);
   world.trees.castShadows(false);
-  if (debug) window.walk = { THREE, player, keys, input, world, camera, teleport, renderer, fps: 0, PLACES, simulate, tick, look, gyro, sound, surface, step: () => stepTaken(performance.now()), steps,
+  if (debug) window.walk = { THREE, player, keys, input, world, camera, teleport, renderer, post, fps: 0, PLACES, simulate, tick, look, gyro, sound, surface, step: () => stepTaken(performance.now()), steps,
     hold: (on) => { hold = on; }, setDay: (u) => { dayClock = u; }, setFov: (v) => { FOV = v; camera.fov = v; camera.updateProjectionMatrix(); } };
   frame();
 
