@@ -7,7 +7,7 @@ import { Sky } from 'three/addons/objects/Sky.js';
 import { Reflector } from './mirror.js';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
-import { noise3, rng, smooth, SCALE, SHADE, OCCLUDERS } from './util.js';
+import { noise3, rng, smooth, SCALE, SHADE, OCCLUDERS, cryptPlan, passageDepth } from './util.js';
 import { makeBirds } from './birds.js';
 import { makeVisitors } from './visitors.js';
 import { makeSunshafts } from './sunshafts.js';
@@ -128,6 +128,15 @@ function weathered(mat, { streaks = 1, courses = false, level = 1, loose = false
       #endif
       vec3 bake = vBaked; float bakeL = dot(bake, vec3(0.3, 0.59, 0.11)), cool = clamp((bake.b - bake.r) / max(bakeL, 1e-4) * 3.0, 0.0, 1.0);
       irradiance += mix(bake, vec3(bakeL), 0.7 * cool) * skyLevel * ${level.toFixed(3)};   // the sky's light in the bake, half its blue: shade is cool, not navy; the lamps' warmth is kept`)
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
+      {   // no lamp in the sky reaches under the sphere's floor or into the crypt: the gathered light of the bores, which casts no shadow, would otherwise shine through the dais
+        vec2 plan = abs(vWP.xz); float lo = min(plan.x, plan.y), hi = max(plan.x, plan.y);
+        float reach = 1.0;
+        if (vWP.y < 13.97 && hi < 31.0) reach = 0.0;
+        else if (vWP.y < 16.95 && lo < 4.1 && hi < 8.5) reach = 0.0;
+        else if (vWP.y < 16.95 && lo < 1.3) reach = smoothstep(8.8, 12.5, hi);          // it comes back by degrees along each way out, as the dais opens over it
+        reflectedLight.directDiffuse *= reach; reflectedLight.directSpecular *= reach;
+      }`)
       .replace('#include <common>', `#include <common>
       varying vec3 vWP, vBaked; uniform float skyLevel; uniform int grainOctaves;${carved ? ' varying float vCavity;' : ''}
       float vh(vec3 p) { p = fract(p * 0.3183 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
@@ -218,12 +227,11 @@ function carving(g) {
 }
 
 // Where the oil lamps are the light: the passages beyond the reach of day, the stairs under the dais,
-// the room beneath the tomb and its way out. 0 in daylight, 1 where only the lamps reach.
+// the crypt beneath the tomb and its ways out. 0 in daylight, 1 where only the lamps reach.
 function lamplit(x, y, z) {
-  if (y < 17.6 && Math.abs(x) < 3.75 && z > -16.6 && z < 3.75) return 1;
+  if (y < 17.6 && cryptPlan(x, z, 0.25)) return 1;
   if (y > 14.2) return 0;
-  const front = Math.abs(x) < 7.3 && z > 2 && z < 112, side = Math.abs(z) < 3.6 && Math.abs(x) < 125;
-  return front || side ? smooth(0, 14, Math.max(front ? 108 - z : -1e9, side ? 121 - Math.abs(x) : -1e9)) : 0;
+  return smooth(0, 14, passageDepth(x, z));
 }
 
 /**
@@ -357,15 +365,18 @@ function stoneUVs(source, tile, sphere) {
 }
 
 /**
- * The passage a face lies in, if any, as the line its courses run along: the front passage or the
- * east-west one, each climbing under the dais at its end. Walls and vaults then take courses that
+ * The passage a face lies in, if any, as the line its courses run along: the front and back passages
+ * or the east and west ones, each climbing under the dais at its end. Walls and vaults then take courses that
  * run along that line and climb straight over the vault, so no joint breaks between faces.
  */
 function passageAxis(x, y, z, n) {
-  if (y > 13.9) return null;                                                        // the room under the tomb, and the sphere's floor and all above it
+  // the walls of the crypt under the tomb and of its ways out are coursed like the passages that lead to it
+  if (y > 13.9 && y < 16.95 && Math.abs(n.y) < 0.5 && cryptPlan(x, z, 0.1)) return { along: Math.abs(n.x) > 0.7 ? 'z' : 'x', at: 0 };
+  if (y > 13.9) return null;                                                        // the sphere's floor and all above it
   const ax = Math.abs(x);
   if (ax < 7.3 && z > 2 && z < 112 && (z < 95 || Math.abs(n.z) < 0.7)) return { along: 'z', at: 0 };
   if (Math.abs(z) < 3.6 && ax < 125 && (ax < 115 || Math.abs(n.x) < 0.7)) return { along: 'x', at: 0 };
+  if (ax < 3.6 && z < -2 && z > -125 && (z > -115 || Math.abs(n.z) < 0.7)) return { along: 'z', at: 0 };
   return null;
 }
 
@@ -790,17 +801,66 @@ function makeBasin() {
 
 function makeSky(renderer, scene) {
   const sky = new Sky();
-  // the model's sky is as bright as the real one, which the camera's exposure for the stone would burn
-  // to white: it is taken down to where a photograph exposed for sunlit stone holds it, a deep blue
-  sky.material.onBeforeCompile = (s) => { s.fragmentShader = s.fragmentShader.replace('threshold + 0.3', 'threshold + 0.12').replace('gl_FragColor = vec4( texColor, 1.0 );', `vec3 d = normalize(vWorldPosition - cameraPosition);
-    float low = 1.0 - smoothstep(0.0, 0.4, max(d.y, 0.0));                        // the pale band of haze at the horizon, kept blue
-    texColor = mix(vec3(dot(texColor, vec3(0.3, 0.59, 0.11))), texColor, 1.0 + 0.35 * low) * (1.0 - 0.22 * low);
-    gl_FragColor = vec4(texColor * ${(0.3 * OUTDOORS).toFixed(3)}, 1.0);`); };
+  // Its clouds are redrawn: the field is billowed by folding it on itself and carried to five octaves, so
+  // an edge is cauliflower and not a smear; each cloud is lit from the sun's side, by how much cloud lies
+  // between it and the sun, so it has a bright flank, a grey one and a darker base; and far above them
+  // lies a thin sheet of cirrus combed into streaks.
+  sky.material.onBeforeCompile = (s) => {
+    let f = s.fragmentShader;
+    f = f.replace('// constants for atmospheric scattering', `float billow( vec2 p, float drift, int octaves ) {
+			const mat2 turn = mat2( 0.8, 0.6, -0.6, 0.8 );
+			float result = 0.0, amplitude = 1.0;
+			for ( int i = 0; i < octaves; i ++ ) { result += amplitude * noise( p ); amplitude *= 0.58; p = turn * p * 2.07 + drift; }
+			return result;
+		}
+		// constants for atmospheric scattering`);
+    const from = f.indexOf('// Clouds'), to = f.indexOf('gl_FragColor = vec4( texColor, 1.0 );');
+    f = f.slice(0, from) + `if ( direction.y > 0.0 && cloudCoverage > 0.0 ) {
+				float dayFactor = smoothstep( -0.08, 0.3, vSunDirection.y );
+				vec3 sunColor = vSunE * Fex * 0.22 * 0.04, skyAmbient = Lin * 0.04 + vec3( 0.0, 0.0003, 0.00075 );
+				float silver = clamp( 0.51 / pow( 1.49 - cosTheta * 1.4, 1.5 ), 0.0, 3.0 );
+				float horizonFade = smoothstep( 0.0, 0.03 + 0.06 * cloudElevation, direction.y );
+
+				vec2 high = direction.xz / ( direction.y + 0.12 ) * cloudScale * 520.0 + time * cloudSpeed * 90.0;
+				float streak = billow( vec2( high.x * 0.3 + high.y * 0.18, high.y * 2.2 - high.x * 0.3 ), 0.0, 4 ) * 0.5 + 0.5;
+				float cirrus = smoothstep( 0.5, 1.0, streak ) * smoothstep( 0.4, 0.75, noise( high * 0.2 + 11.0 ) * 0.5 + 0.5 ) * 0.42 * horizonFade;
+				vec3 cirrusColor = ( skyAmbient * 0.6 + vec3( dot( sunColor, vec3( 0.3, 0.59, 0.11 ) ) ) * ( 2.8 + 0.5 * silver ) ) * max( dayFactor, 0.03 );
+				texColor = mix( texColor, mix( texColor, cirrusColor, Fex ), cirrus );
+
+				vec2 cloudUV = direction.xz / ( direction.y * mix( 1.0, 0.1, cloudElevation ) ) * cloudScale + time * cloudSpeed;
+				float evolve = time * cloudSpeed * 300.0;
+				vec2 q = cloudUV * 1000.0;
+				q += 0.35 * vec2( noise( q * 0.6 + 3.1 ), noise( q * 0.6 + 7.7 ) );
+				float threshold = 1.0 - clamp( cloudCoverage + ( noise( cloudUV * 300.0 ) * 0.37 ) * 0.6, 0.0, 1.0 );
+				float depth = clamp( billow( q, evolve, 5 ) * 0.57 + 0.5, 0.0, 1.0 ) - threshold;
+				if ( depth > 0.0 ) {
+					vec2 toSun = normalize( vSunDirection.xz + vec2( 1e-4 ) ) * 0.3;
+					float before = max( 0.0, clamp( billow( q + toSun, evolve, 3 ) * 0.6 + 0.5, 0.0, 1.0 ) - threshold );
+					float lit = exp( before * -9.0 ), thick = smoothstep( 0.0, 0.35, depth );
+					// white in the sun and blue-grey in its own shade: the sun's light on it keeps a little of its warmth, the sky's a little of its blue
+					vec3 sunWhite = mix( vec3( dot( sunColor, vec3( 0.3, 0.59, 0.11 ) ) ), sunColor, 0.2 ), skyGrey = mix( vec3( dot( skyAmbient, vec3( 0.3, 0.59, 0.11 ) ) ), skyAmbient, 0.45 );
+					vec3 cloudColor = skyGrey * mix( 1.0, 0.65, thick ) + sunWhite * mix( 0.25, 3.6, lit ) * mix( 1.0, 0.6, thick );
+					cloudColor += sunWhite * silver * ( 1.0 - smoothstep( 0.0, 0.08, depth ) ) * 0.5;
+					cloudColor *= max( dayFactor, 0.03 );
+					float alpha = ( 1.0 - exp( depth * cloudDensity * -24.0 ) ) * horizonFade;
+					texColor -= L0 * 0.04 * alpha;
+					texColor = mix( texColor, mix( texColor, cloudColor, Fex ), alpha );
+				}
+			}
+			` + f.slice(to);
+    // the model's sky is as bright as the real one, which the camera's exposure for the stone would burn
+    // to white: it is taken down to where a photograph exposed for sunlit stone holds it, a deep blue
+    // overhead that pales into the haze toward the horizon
+    s.fragmentShader = f.replace('gl_FragColor = vec4( texColor, 1.0 );', `vec3 d = normalize(vWorldPosition - cameraPosition);
+    float low = 1.0 - smoothstep(0.0, 0.4, max(d.y, 0.0));
+    texColor = mix(vec3(dot(texColor, vec3(0.3, 0.59, 0.11))), texColor, 1.0 + 0.15 * low) * (1.0 - 0.08 * low);
+    gl_FragColor = vec4(texColor * ${(0.3 * OUTDOORS).toFixed(3)}, 1.0);`);
+  };
   sky.scale.setScalar(16000);
   const u = sky.material.uniforms;
-  u.turbidity.value = 1.8; u.rayleigh.value = 2.6; u.mieCoefficient.value = 0.0025; u.mieDirectionalG.value = 0.8;
+  u.turbidity.value = 2.6; u.rayleigh.value = 2.6; u.mieCoefficient.value = 0.0035; u.mieDirectionalG.value = 0.8;
   u.sunPosition.value.copy(SUN);
-  u.cloudCoverage.value = 0.4; u.cloudDensity.value = 1.4; u.cloudScale.value = 0.00018; u.cloudElevation.value = 0.42;
+  u.cloudCoverage.value = 0.37; u.cloudDensity.value = 1.4; u.cloudScale.value = 0.0004; u.cloudElevation.value = 0.42;
   const envScene = new THREE.Scene();
   envScene.add(sky);
   const pmrem = new THREE.PMREMGenerator(renderer);
@@ -1058,7 +1118,7 @@ export async function loadWorld(renderer, onProgress) {
 
   placeSun(0.2);
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0xc9d2dc, 0.0006);   // aerial haze at the ground; its colour follows the sun
+  scene.fog = new THREE.FogExp2(0xc9d2dc, 0.0012);   // aerial haze at the ground; its colour follows the sun
 
   const std = (o) => new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0, ...o });   // matte: weathered limestone has no sheen
   const LIMESTONE = 0xfbf3ef;      // warms and tones down the neutral stone textures
@@ -1162,16 +1222,16 @@ export async function loadWorld(renderer, onProgress) {
         const c = g.attributes.color, pos = g.attributes.position, baked = new Float32Array(c.count * 3);
         for (let v = 0; v < c.count; v++) {
           const x = pos.getX(v), y = pos.getY(v), z = pos.getZ(v);
-          const inFront = Math.abs(x) < 7.3 && z > 2 && z < 110, inSide = Math.abs(z) < 3.5 && Math.abs(x) < 125;
-          const depth = y < 14.1 ? (inFront ? 108 - z : inSide ? 121 - Math.abs(x) : 0) : 0, k = 1 + (PASSAGES - 1) * smooth(0, 14, depth);
+          const depth = y < 14.1 ? Math.max(0, passageDepth(x, z)) : 0, k = 1 + (PASSAGES - 1) * smooth(0, 14, depth);
           const wallHead = name.startsWith('Drum (main cylinder)') || name.startsWith('Drum_(main_cylinder)');
           const least = name === 'Basin coping' ? 0.55 : 0;   // its sides meet the ground, where the bake's vertices went dark
           const open = 1 - smooth(0, 14, depth);              // under the open sky, where shade is lit by the whole blue of it
           let r = c.getX(v) * k, g = c.getY(v) * k, b = c.getZ(v) * k;
-          // The wall behind the inscription has corners only at its head and foot, and the bake left one
-          // bright patches at its head and foot, which its great faces drew out into wedges of light: it is
-          // given the plain shade of a wall under an overhang instead, deepening toward the top.
-          if (wallHead && z > 90 && Math.abs(x) < 45 && y > 5 && Math.abs(Math.hypot(x, z) - 104) < 1.5) { r = g = b = 0.42 + 0.2 * (1 - smooth(5.5, 43, y)); }
+          // The wall behind the inscription stands under the bridge, where the bake had it nearly black in
+          // places and bright in others. The whole of it, every corner, is given the plain shade of a wall
+          // under an overhang instead, deepening toward the top: no part of it keeps another light, so
+          // nothing is drawn out across it into bands.
+          if (wallHead && key === 'Limestone dressed') { r = g = b = 0.42 + 0.2 * (1 - smooth(5.5, 43, y)); }
           const most = open > 0.99 ? 0.7 / Math.max(g, 0.7) : 1;      // and no shade in the open is lit harder than the sky and the ground can light it
           r *= most; g *= most; b *= most;
           baked[v * 3] = Math.max(r * (1 + open * (SKY_FILL * 0.9 - 1)), least); baked[v * 3 + 1] = Math.max(g * (1 + open * (SKY_FILL - 1)), least); baked[v * 3 + 2] = Math.max(b * (1 + open * (SKY_FILL * 1.14 - 1)), least);
@@ -1200,7 +1260,7 @@ export async function loadWorld(renderer, onProgress) {
       }
       if (key.startsWith('Vault') || name === 'Interior floor' || name.startsWith('Sarcophagus')) inside.push(mesh.geometry);
     }
-    const indoors = key.startsWith('Vault') || key === 'Bore' || name === 'Interior floor' || name.startsWith('Sarcophagus') || name === 'Passage stairs';
+    const indoors = key.startsWith('Vault') || key === 'Bore' || name === 'Interior floor' || name.startsWith('Sarcophagus') || name === 'Passage stairs' || name === 'Crypt parapets';
     if (indoors) mesh.layers.set(1);
     if (key.startsWith('Vault') || key === 'Bore') vaults.push(mesh);                   // the basin's reflection is drawn without what it could never show
     mesh.castShadow = !indoors && name !== 'Inscription' && key !== 'Planting bed (soil, needle litter)' && name !== 'Esplanade and walks' && name !== 'Basin coping';   // low and flat, they would shadow only themselves, in stripes
@@ -1276,7 +1336,7 @@ export async function loadWorld(renderer, onProgress) {
     skyUniforms.sunPosition.value.copy(SUN);
     const lift = smooth(0.1, 0.6, SUN.y);
     sun.color.lerpColors(low, high, lift);
-    sunStrength = (4.4 + 1.8 * lift) * OUTDOORS;
+    sunStrength = (5.0 + 2.0 * lift) * OUTDOORS;
     sun.intensity = close ? 0 : sunStrength;     // inside, sunlight arrives only down the bores
     SKY_LEVEL.value = 0.5 + 0.5 * lift;
     scene.fog.color.lerpColors(HAZE_LOW, HAZE_HIGH, lift).multiplyScalar(OUTDOORS);   // warm when the sun is low, the pale blue of the horizon at midday

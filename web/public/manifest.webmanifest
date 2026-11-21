@@ -3,7 +3,7 @@
   "short_name": "Cénotaphe",
   "description": "Walk through Étienne-Louis Boullée's unbuilt 1784 monument to Isaac Newton.",
   "start_url": "./",
-  "display": "fullscreen",
+  "display": "browser",
   "background_color": "#0c0f14",
   "theme_color": "#0c0f14",
   "icons": [

@@ -31,3 +31,20 @@ export function noise3(x, y, z) {
 // corners and leaves the sun's alone. While it is off, or for a reflection, it reads as fully open.
 export const SHADE = { map: { value: null }, texel: { value: new THREE.Vector2(1, 1) }, on: { value: 0 } };
 export const OCCLUDERS = 2;                       // the layer of what is measured for it
+
+// The plan of what lies under the sphere's floor, as scripts/build_scene.py builds it, in the page's axes
+// (the front is +z). The crypt under the tomb is a cross of four arms, each with a way out through
+// a face of the dais; four passages run in to it, the front one from the arch and wider at its mouth.
+export function cryptPlan(x, z, pad = 0) {
+  const ax = Math.abs(x), az = Math.abs(z), lo = Math.min(ax, az), hi = Math.max(ax, az);
+  return (hi < 8.4 + pad && lo < 4 + pad) || (lo < 1.2 + pad && hi < 16 + pad);
+}
+/** How far into a passage a point is, from where daylight ends at its mouth; -Infinity outside them all. */
+export function passageDepth(x, z) {
+  const ax = Math.abs(x), az = Math.abs(z);
+  let depth = -Infinity;
+  if (ax < 7.3 && z > 2 && z < 112) depth = 103.5 - z;                      // from just inside the wall's face, so the face itself stays in daylight
+  if (az < 3.6 && ax < 125) depth = Math.max(depth, 118.5 - ax);
+  if (ax < 3.6 && z < -2 && z > -125) depth = Math.max(depth, 118.5 + z);
+  return depth;
+}

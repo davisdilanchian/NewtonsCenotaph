@@ -125,7 +125,7 @@ export function makePost(renderer) {
       gl_FragColor.rgb += mix(vec3(-0.012, 0.0, 0.016), vec3(0.022, 0.008, -0.022), smoothstep(0.2, 0.8, g)) * smoothstep(0.02, 0.18, g);   // a print's split: cool shade, warm light; black stays black
       float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy + fract(time) * vec2(37.0, 17.0), vec2(0.06711056, 0.00583715))));
       gl_FragColor.rgb += (n - 0.5) * (1.0 / 160.0 + 0.022 * g * (1.0 - g)); }`,
-    { scene: { value: target.texture }, spread: { value: levels[0].texture }, shade: { value: shade.texture }, shadeView: { value: new URLSearchParams(location.search).has('aoview') ? 1 : 0 }, amount: { value: 0.07 }, time: { value: 0 } }, { toneMapped: true });
+    { scene: { value: target.texture }, spread: { value: levels[0].texture }, shade: { value: shade.texture }, shadeView: { value: new URLSearchParams(location.search).has('aoview') ? 1 : 0 }, amount: { value: 0.15 }, time: { value: 0 } }, { toneMapped: true });
 
   const size = new THREE.Vector2();
   const draw = (material, to) => { quad.material = material; renderer.setRenderTarget(to); renderer.render(stage, flat); };
@@ -171,7 +171,7 @@ export function makePost(renderer) {
         levels.forEach((l, i) => { src.value = from.texture; texel.value.set(0.5 / from.width, 0.5 / from.height); first.value = i ? 0 : 1; draw(down, l); from = l; });
         for (let i = LEVELS - 1; i > 0; i--) { src.value = levels[i].texture; texel.value.set(1 / levels[i].width, 1 / levels[i].height); draw(up, levels[i - 1]); }
       }
-      final.uniforms.amount.value = post.glow ? 0.07 : 0;
+      final.uniforms.amount.value = post.glow ? 0.15 : 0;
       final.uniforms.time.value = time;
       draw(final, null);
       renderer.autoClear = true;

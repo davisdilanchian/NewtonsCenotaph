@@ -52,38 +52,39 @@ for s_ in (-1, 1):
     cols.append(ramp_mesh(f"COL_cornice_guide_{'L' if s_ < 0 else 'R'}",
                           [[(s_ * 30, -76.0, 49), (s_ * 10.3, -84.6, 49), (s_ * 10.3, -84.6, 67), (s_ * 30, -76.0, 67)]]))
 
-# the dais in the sphere: a slope over its step nosings on each face, open at the doorway in the
-# back, and the walls of the room under the tomb and its corridor out, since the steps themselves
-# are not walked on
+# the dais in the sphere: a slope over its step nosings on each face, open at the doorway in it, and
+# the walls of the crypt under the tomb and of its four ways out, since the steps themselves are not
+# walked on
 z0, z1, n_ = D["floor_top"], D["mound_top"], D["dais_steps"]
 b_, t_ = D["dais_base_half"], D["dais_top_half"]
 tread, rise_ = (b_ - t_) / n_, (z1 - z0) / n_
 foot, head = b_ + tread, t_ + tread                       # the slope through the nosings, run down to the floor
-dw, dh = 1.2, 2.9
+dw, dh = B.DOOR_W, B.DOOR_H
 hd = foot - dh * tread / rise_                            # where the slope clears the top of the doorway
 zd = z0 + dh
 spin = lambda q, a: [(x * math.cos(a) - y * math.sin(a), x * math.sin(a) + y * math.cos(a), z) for x, y, z in q]
-back = [[(-foot, -foot, z0), (-dw, -foot, z0), (-dw, -hd, zd), (-hd, -hd, zd)],     # a face round its doorway, as the front, turned to the back
+face = [[(-foot, -foot, z0), (-dw, -foot, z0), (-dw, -hd, zd), (-hd, -hd, zd)],     # a face round its doorway
         [(dw, -foot, z0), (foot, -foot, z0), (hd, -hd, zd), (dw, -hd, zd)],
         [(-hd, -hd, zd), (hd, -hd, zd), (head, -head, z1), (-head, -head, z1)]]
-quads = [[(-head, -head, z1), (head, -head, z1), (head, head, z1), (-head, head, z1)]] + [spin(q, math.pi) for q in back]
-for a in (0, 1, 3):
-    quads.append(spin([(-foot, -foot, z0), (foot, -foot, z0), (head, -head, z1), (-head, -head, z1)], a * math.pi / 2))
-C, ct = B.CHAMBER, z0 + B.CHAMBER_H
-w_ = D["passage_half_w"]
-walls = [[(s_ * dw, foot, z0), (s_ * dw, C, z0), (s_ * dw, C, zd), (s_ * dw, foot, zd)] for s_ in (-1, 1)]     # the corridor out
-for x0_, y0_, x1_, y1_ in ((-C, -C, -w_, -C), (w_, -C, C, -C), (-C, C, -dw, C), (dw, C, C, C),             # front and back, round their openings
-                           (-C, -C, -C, -w_), (-C, w_, -C, C), (C, -C, C, -w_), (C, w_, C, C)):             # the sides, round the stairs
-    walls.append([(x0_, y0_, z0), (x1_, y1_, z0), (x1_, y1_, ct), (x0_, y0_, ct)])
+quads = [[(-head, -head, z1), (head, -head, z1), (head, head, z1), (-head, head, z1)]]
+A, E, ct = B.ARM, B.ARM_END, z0 + B.CRYPT_H
+walls = []
+for a in range(4):
+    quads += [spin(q, a * math.pi / 2) for q in face]
+    arm = [[(s_ * dw, foot, z0), (s_ * dw, E, z0), (s_ * dw, E, zd), (s_ * dw, foot, zd)] for s_ in (-1, 1)]     # the way out
+    for x0_, y0_, x1_, y1_ in ((-A, A, -A, E), (A, A, A, E), (-A, E, -dw, E), (dw, E, A, E)):                  # the arm's sides, and its end round the doorway
+        arm.append([(x0_, y0_, z0), (x1_, y1_, z0), (x1_, y1_, ct), (x0_, y0_, ct)])
+    walls += [spin(q, a * math.pi / 2) for q in arm]
 cols.append(ramp_mesh("COL_dais", quads))
 cols.append(ramp_mesh("COL_crypt_walls", walls))
 
-# the three flights up under the dais: a slope along their nosings, from the level passage to the room
+# the four flights up under the dais: a slope along their nosings, from the level passage to the crypt
 pz, ft = D["passage_z"], D["floor_top"]
+w_ = D["passage_half_w"]
 n_s = int(round((ft - pz) / 0.2)); run_ = (B.RISE_FOOT - B.RISE_HEAD) / n_s
 fl = []
-for a in (0, 1, 2):                                       # east, front and west: the flight along +x, turned
-    a_, b2, c_ = B.RISE_FOOT + run_, B.RISE_HEAD + run_, B.CHAMBER - 0.6
+for a in range(4):                                        # the flight along +x, turned
+    a_, b2, c_ = B.RISE_FOOT + run_, B.RISE_HEAD + run_, B.RISE_HEAD - 0.6
     for q in ([(a_, -w_, pz), (a_, w_, pz), (b2, w_, ft), (b2, -w_, ft)], [(b2, -w_, ft), (b2, w_, ft), (c_, w_, ft), (c_, -w_, ft)]):
         fl.append(spin(q, -a * math.pi / 2))
 cols.append(ramp_mesh("COL_crypt_stairs", fl))
@@ -98,6 +99,14 @@ for ob in keep:
         ob.data.set_sharp_from_angle(angle=math.radians(35))
     ob.select_set(True)
 bpy.context.view_layer.objects.active = keep[0]
+
+# The wall behind the inscription meets the slanted faces of the cut beside it at an edge. A corner
+# shared across that edge takes one light for both faces, and the cut, open to the sky, would lighten
+# the shaded wall along it: the drum's sharp edges are parted, so each face keeps its own.
+drum = bpy.data.objects["Drum (main cylinder)"]
+bm = bmesh.new(); bm.from_mesh(drum.data)
+bmesh.ops.split_edges(bm, edges=[e for e in bm.edges if len(e.link_faces) == 2 and e.calc_face_angle(0.0) > math.radians(35)])
+bm.to_mesh(drum.data); bm.free()
 
 # sky light, path traced into the vertices: the page adds only the moving sun on top of it
 sc.render.engine = "CYCLES"
@@ -166,6 +175,25 @@ for ob in targets:
     me.color_attributes["Baked"].data.foreach_set("color", c.ravel())
     me.color_attributes.remove(me.color_attributes["Bounce"])
     me.color_attributes.active_color_name = "Baked"
+# A pinhole's rim on the outside of the sphere takes the shade of the bore behind it, and shows from the
+# terraces as a dark speck: each such corner takes the light of the brightest open stone it joins.
+me = next(o for o in targets if o.name.startswith("Sphere")).data
+n = len(me.vertices)
+co = np.zeros(n * 3, np.float32); me.vertices.foreach_get("co", co); co = co.reshape(-1, 3)
+outer = (np.linalg.norm(co - np.array([0, 0, D["sphere_cz"]], np.float32), axis=1) > D["sphere_R"] - 0.05) & (co[:, 2] > D["tier_top"] + 3)
+edges = np.zeros(len(me.edges) * 2, np.int32); me.edges.foreach_get("vertices", edges); edges = edges.reshape(-1, 2)
+edges = edges[outer[edges[:, 0]] & outer[edges[:, 1]]]
+a_, b_ = np.concatenate([edges[:, 0], edges[:, 1]]), np.concatenate([edges[:, 1], edges[:, 0]])
+c = np.zeros(n * 4, np.float32); me.color_attributes["Baked"].data.foreach_get("color", c); c = c.reshape(-1, 4)
+for _ in range(2):
+    lum = c[:, :3].sum(1)
+    order = np.argsort(lum[b_])                               # ascending, so the last one written to each corner is its brightest neighbour
+    best, src = lum.copy(), np.arange(n)
+    best[a_[order]] = lum[b_[order]]; src[a_[order]] = b_[order]
+    fix = outer & (lum < 0.8 * best)
+    c[fix] = c[src[fix]]
+me.color_attributes["Baked"].data.foreach_set("color", c.ravel())
+print("RIMS", int(fix.sum()))
 for ob in keep:
     ob.select_set(True)
 print("BAKED", len(targets))

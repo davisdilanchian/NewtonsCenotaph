@@ -5,7 +5,7 @@
 // falls into conversation with whoever else is standing there, and moves on. Some come in pairs and
 // keep together. They bow when you come up to them, and stand aside to let you by.
 import * as THREE from 'three';
-import { rng, clamp, smooth, SCALE } from './util.js';
+import { rng, clamp, smooth, SCALE, cryptPlan, passageDepth } from './util.js';
 import { makeCutouts } from './figures.js';
 
 // places: [name, x, z, radius to stand about in, height to look for the floor from, what there is to look at, how well liked]
@@ -27,22 +27,32 @@ const PLACES = [
   ['arch', 0, 113.5, 1.3, 5.5, TOMB, 0],
   // the front passage, its stair, the room under the tomb and the way out into the sphere
   ['p1', 0, 80, 1.1, 5.5, TOMB, 0], ['p2', 0, 45, 1.1, 5.5, TOMB, 0], ['pFoot', 0, 19.5, 1.1, 5.5, TOMB, 0],
-  ['room', 0, 0.4, 1.6, 14, [0, 14, -20], 2], ['door', 0, -16.4, 0.7, 14, [0, 40, -60], 0],
-  // the side passages, from the terrace to the room
+  ['room', 0, 0, 1.3, 14, [0, 14, -20], 2],
+  // the side and back passages, from the terrace to the crypt
   ['mouthE', 122, 0, 1.1, 5.5, TOMB, 0], ['sideE', 70, 0, 1.1, 5.5, TOMB, 0], ['footE', 19.5, 0, 1.1, 5.5, TOMB, 0],
   ['mouthW', -122, 0, 1.1, 5.5, TOMB, 0], ['sideW', -70, 0, 1.1, 5.5, TOMB, 0], ['footW', -19.5, 0, 1.1, 5.5, TOMB, 0],
-  // up the faces of the dais to the tomb
-  ['daisE', 5.9, 0, 1, 18.6, TOMB, 3], ['daisW', -5.9, 0, 1, 18.6, TOMB, 3], ['daisS', 0, 5.2, 1.5, 18.6, TOMB, 3],
+  ['mouthN', 0, -122, 1.1, 5.5, TOMB, 0], ['sideN', 0, -70, 1.1, 5.5, TOMB, 0], ['footN', 0, -19.5, 1.1, 5.5, TOMB, 0],
+  // up the faces of the dais to the tomb, clear of the doorway in the middle of each
+  ['daisE', 5.9, 3.4, 1, 18.6, TOMB, 3], ['daisW', -5.9, 3.4, 1, 18.6, TOMB, 3], ['daisS', 3.4, 5.9, 1, 18.6, TOMB, 3],
   ['daisSE', 5.9, 5.3, 1, 18.6, TOMB, 1], ['daisSW', -5.9, 5.3, 1, 18.6, TOMB, 1],
   // on the stair block's head, against the sphere
   ['tier', 0, 83.6, 2.4, 64, [0, 0, 400], 1],
 ];
+// Out of the crypt by each of its four arms: from the middle past the corner of the flight's well, along
+// the walk beside it, onto the landing over the flight, and out through the doorway in that face.
+const ARMS = [['N', 0, -1], ['E', 1, 0], ['S', 0, 1], ['W', -1, 0]];
+for (const [tag, dx, dz] of ARMS) {
+  const px = -dz, pz = dx, at = (along, across) => [dx * along + px * across, dz * along + pz * across];
+  PLACES.push([`corner${tag}`, ...at(2.75, 2.75), 0.3, 14, TOMB, 0], [`walk${tag}`, ...at(5, 3.2), 0.4, 14, TOMB, 0], [`turn${tag}`, ...at(7.55, 3.2), 0.4, 14, TOMB, 0],
+              [`land${tag}`, ...at(7.55, 0), 0.5, 14, [dx * 60, 40, dz * 60], 1], [`door${tag}`, ...at(16.4, 0), 0.7, 14, [dx * 60, 40, dz * 60], 0]);
+}
 const WAYS = [
   ['s0', 'w0'], ['s0', 'e0'], ['w0', 'w1'], ['w1', 'w2'], ['w2', 'w3'], ['w3', 'w4'], ['w4', 'w5'], ['e0', 'e1'], ['e1', 'e2'], ['e2', 'e3'], ['e3', 'e4'], ['e4', 'e5'],
   ['w5', 'head'], ['e5', 'head'], ['w5', 'courtW'], ['e5', 'courtE'], ['head', 'court'], ['court', 'courtW'], ['court', 'courtE'], ['court', 'foot'], ['courtW', 'foot'], ['courtE', 'foot'],
   ['foot', 'top', 'steps'], ['top', 'fore'], ['top', 'foreW'], ['top', 'foreE'], ['fore', 'foreW'], ['fore', 'foreE'], ['foreW', 'lionW'], ['foreE', 'lionE'], ['top', 'lionW'], ['top', 'lionE'],
-  ['fore', 'arch'], ['arch', 'p1'], ['p1', 'p2'], ['p2', 'pFoot'], ['pFoot', 'room', 'steps'], ['room', 'door'],
-  ['mouthE', 'sideE'], ['sideE', 'footE'], ['footE', 'room', 'steps'], ['mouthW', 'sideW'], ['sideW', 'footW'], ['footW', 'room', 'steps'],
+  ['fore', 'arch'], ['arch', 'p1'], ['p1', 'p2'], ['p2', 'pFoot'], ['pFoot', 'room', 'steps'],
+  ['mouthE', 'sideE'], ['sideE', 'footE'], ['footE', 'room', 'steps'], ['mouthW', 'sideW'], ['sideW', 'footW'], ['footW', 'room', 'steps'], ['mouthN', 'sideN'], ['sideN', 'footN'], ['footN', 'room', 'steps'],
+  ...ARMS.flatMap(([t]) => [['room', `corner${t}`], [`corner${t}`, `walk${t}`], [`walk${t}`, `turn${t}`], [`turn${t}`, `land${t}`], [`land${t}`, `door${t}`]]),
   ['daisE', 'daisSE'], ['daisSE', 'daisS'], ['daisS', 'daisSW'], ['daisSW', 'daisW'],
 ];
 // rings: the floor of the sphere round the dais, the ground terrace round the drum, and the drum terrace
@@ -54,8 +64,8 @@ const RINGS = [
 
 // How much light a visitor stands in: full daylight outside, little in the passages, less in the void.
 function lightAt(x, y, z) {
-  if (y < 13.9 && (Math.abs(x) < 7.3 && z > 2 && z < 100 || Math.abs(z) < 3.6 && Math.abs(x) < 112)) return 0.3;
-  if (y < 17.5 && Math.abs(x) < 3.6 && z > -16 && z < 3.6) return 0.3;                // the room under the tomb and its way out
+  if (y < 13.9 && passageDepth(x, z) > 9) return 0.3;
+  if (y < 17.5 && cryptPlan(x, z, 0.1)) return 0.3;                                    // the crypt under the tomb and its ways out
   return Math.hypot(x, y - 73.5, z) < 67 ? 0.16 : 1;
 }
 
@@ -87,8 +97,9 @@ function buildNet(standOn, ray) {
   }
   join('fore', 'g0'); join('foreW', 'g17'); join('foreE', 'g1'); join('lionW', 'g17'); join('lionE', 'g1');
   join('mouthE', 'g4'); join('mouthE', 'g5'); join('mouthW', 'g13'); join('mouthW', 'g14');        // g4.5 and g13.5 would be due east and west
-  join('door', 'v6'); join('door', 'v5'); join('door', 'v7');
-  join('v3', 'daisE', true); join('v9', 'daisW', true); join('v0', 'daisS', true);
+  join('mouthN', 'g9');
+  for (const [k, tag] of [[0, 'S'], [3, 'E'], [6, 'N'], [9, 'W']]) for (const d of [-1, 0, 1]) join(`door${tag}`, `v${(k + d + 12) % 12}`);
+  join('v2', 'daisE', true); join('v10', 'daisW', true); join('v1', 'daisS', true);
   // which nodes can reach which, so nobody sets out for a terrace with no stair to it
   let part = 0;
   for (const n of nodes) {

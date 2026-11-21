@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { loadWorld, groundHeight, CENTER, SUN } from './world.js';
 import { Player, RADIUS, WALK, RUN } from './player.js';
-import { clamp, lerp, SCALE } from './util.js';
+import { clamp, lerp, SCALE, cryptPlan, passageDepth } from './util.js';
 import { makeSound } from './sound.js';
 import { makePost } from './post.js';
 
@@ -183,16 +183,16 @@ function teleport(i) {
 
 function show(p) { $('whereName').textContent = p.name; $('whereNote').textContent = p.note; }
 
-// in the passages: the front one and the east-west one, each as it climbs under the dais
+// in the passages: the four of them, each as it climbs under the dais
 function underground() {
-  const { x, z } = player.pos, r = Math.hypot(x, z);
-  return player.feet < 13.9 && (Math.abs(x) < 7.2 && z > 2 && z < 105 || Math.abs(z) < 3.5 && r < 119);
+  const { x, z } = player.pos;
+  return player.feet < 13.9 && passageDepth(x, z) > 2;
 }
 
-// the room inside the dais, under the sarcophagus, and its corridor out to the doorway
+// the crypt inside the dais, under the sarcophagus, and its four ways out to the doorways
 function inCrypt() {
   const { x, z } = player.pos;
-  return player.feet > 13.5 && player.feet < 17 && (Math.abs(x) < 3.6 && Math.abs(z) < 3.6 || Math.abs(x) < 1.3 && z < 0 && z > -15.4);
+  return player.feet > 13.5 && player.feet < 17 && cryptPlan(x, z, 0.1) && Math.max(Math.abs(x), Math.abs(z)) < 15.4;
 }
 
 // what is underfoot, from the plan: paving and stairs, the gravel walks, or the meadow
@@ -223,7 +223,7 @@ function inSphere() { return player.pos.distanceTo(CENTER) < 67 && !underground(
 
 function placeLabel(feet) {
   const r = Math.hypot(player.pos.x, player.pos.z);
-  if (inCrypt()) return { name: 'Beneath the sarcophagus', note: 'Three stairs meet here; the fourth way leads out into the sphere' };
+  if (inCrypt()) return { name: 'Beneath the sarcophagus', note: 'Four stairs come up here from the four passages; a doorway leads out through each face of the dais' };
   if (inSphere()) return PLACES[3];
   if (underground()) return PLACES[2];
   if (feet > 60) return PLACES[6];

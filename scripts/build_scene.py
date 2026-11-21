@@ -147,39 +147,68 @@ def passage(points, step=3.5):
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     return bm
 
-RISE_FOOT, RISE_HEAD = 18.5, 3.5   # where the passages start to climb, and where they arrive under the tomb
-RISE_H = 3.0                  # their height as they climb, so the dais keeps a roof over them
-CHAMBER, CHAMBER_H = 3.5, 3.0     # half width and height of the room under the sarcophagus
+RISE_FOOT, RISE_HEAD = 18.0, 3.0   # where the passages start to climb, and where they arrive under the tomb
+RISE_H = 2.8                  # the height cut over each flight where it rises into the crypt, short of the crypt's ceiling
+ARM, ARM_END, CRYPT_H = 4.0, 8.4, 2.9   # the crypt under the tomb, a cross: half the width of its arms, how far they reach, its height
+LANDING = 6.4                 # from here to the arm's end its floor is whole again, over the flight: the landing before the doorway
+DOOR_W, DOOR_H = 1.2, 2.9     # the doorway out through each face of the dais: half its width, and its height
+ROOF = 0.32                   # the stone left between a flight and the floor it passes under
+RISE_ROOFED = 9.6             # from here in, the flight's vault is held down under that floor
+
+def rise_z(r):
+    """The height of a flight's slope at a distance r from the axis."""
+    return D["floor_top"] - (r - RISE_HEAD) * (D["floor_top"] - D["passage_z"]) / (RISE_FOOT - RISE_HEAD)
 
 def passages():
-    """The section (sheet 04): a passage runs level in from each side, then climbs at about 30°
-    under the dais, parallel to its faces, to a small room beneath the sarcophagus. The front way,
-    the elevation's arch, does the same, so the room is a crossing of four arms: three flights up
-    from the passages, and a corridor out through a doorway in the dais's back face into the sphere."""
+    """The plan (sheet 01) dots a passage along each of the four axes, and the section (sheet 04) has
+    them run level in from the drum's wall, then climb at about 30° under the dais to its middle. So
+    there are four: the front one from the elevation's arch, and one each from the east, the west and
+    the back of the drum. Each flight comes up through the floor of a cross-shaped crypt beneath the
+    sarcophagus, and each arm of the cross goes on, over its flight, to a doorway in that face of the
+    dais, as the interior view (sheet 06) draws it: four passages in, four doorways out."""
     z, w, h, ft = D["passage_z"], D["passage_half_w"], D["passage_h"], D["floor_top"]
     tw, top = D["tunnel_half_w"], D["tunnel_spring"] + D["tunnel_half_w"] - z
-    climb = lambda ax, ay: [(ax * RISE_FOOT, ay * RISE_FOOT, z, w, h), (ax * RISE_HEAD, ay * RISE_HEAD, ft, w, RISE_H),
-                            (ax * (CHAMBER - 0.6), ay * (CHAMBER - 0.6), ft, w, RISE_H)]
+    under = lambda r: ft - ROOF - rise_z(r)                   # the height left for the flight beneath the crypt's floor
+    climb = lambda ax, ay: [(ax * r, ay * r, zz, w, hh) for r, zz, hh in (
+        (RISE_FOOT, z, h), (RISE_ROOFED, rise_z(RISE_ROOFED), under(RISE_ROOFED)), (LANDING, rise_z(LANDING), under(LANDING)),
+        (LANDING - 0.02, rise_z(LANDING - 0.02), RISE_H), (RISE_HEAD, ft, RISE_H), (RISE_HEAD - 0.6, ft, RISE_H))]
     legs = [[(0, -110.0, z, tw, top), (0, -96.0, z, tw, top), (0, -95.8, z, w, h)] + climb(0, -1)]
-    for sx in (1, -1):
-        legs.append([(sx * 123.0, 0, z, w + 1.2, h + 1.7), (sx * 116.0, 0, z, w, h)] + climb(sx, 0))
+    for ax, ay in ((1, 0), (-1, 0), (0, 1)):
+        legs.append([(ax * 123.0, ay * 123.0, z, w + 1.2, h + 1.7), (ax * 116.0, ay * 116.0, z, w, h)] + climb(ax, ay))
     return legs
 
 def passage_stairs():
-    """Steps for the three flights up under the dais, laid over the cut slope: each tread's far edge
+    """Steps for the four flights up under the dais, laid over the cut slope: each tread's far edge
     sits on the slope, so the slope stays hidden beneath them."""
     z, ft, w = D["passage_z"], D["floor_top"], D["passage_half_w"]
     n = int(round((ft - z) / 0.2))
     rise, run = (ft - z) / n, (RISE_FOOT - RISE_HEAD) / n
     bm = bmesh.new()
-    for ax, ay in ((1, 0), (-1, 0), (0, -1)):
+    for ax, ay in ((1, 0), (-1, 0), (0, -1), (0, 1)):
         for k in range(n):
             r0 = RISE_FOOT - k * run
             a0, a1 = sorted((r0, r0 - run))
             if ax:
                 box(ax * a0 if ax > 0 else -a1, ax * a1 if ax > 0 else -a0, -w + 0.01, w - 0.01, z - 0.3, z + (k + 1) * rise, bm)
             else:
-                box(-w + 0.01, w - 0.01, -a1, -a0, z - 0.3, z + (k + 1) * rise, bm)
+                box(-w + 0.01, w - 0.01, ay * a0 if ay > 0 else -a1, ay * a1 if ay > 0 else -a0, z - 0.3, z + (k + 1) * rise, bm)
+    return bm
+
+def turned(q, quarter):
+    """A box's (x0, x1, y0, y1) turned by quarter turns about the axis."""
+    x0, x1, y0, y1 = q
+    for _ in range(quarter % 4):
+        x0, x1, y0, y1 = -y1, -y0, x0, x1
+    return x0, x1, y0, y1
+
+def crypt_parapets():
+    """A low wall round three sides of each flight's well in the crypt's floor: along both its
+    sides, and across the edge of the landing."""
+    w, ft, bm = D["passage_half_w"], D["floor_top"], bmesh.new()
+    for quarter in range(4):
+        for q in ((w, w + 0.18, RISE_HEAD, LANDING + 0.18), (-w - 0.18, -w, RISE_HEAD, LANDING + 0.18), (-w, w, LANDING, LANDING + 0.18)):
+            x0, x1, y0, y1 = turned(q, quarter)
+            box(x0, x1, y0, y1, ft - 0.02, ft + 0.34, bm)            # a metre high at the visitors' scale
     return bm
 
 def passage_lamps():
@@ -197,8 +226,11 @@ def passage_lamps():
                 q = a + run * ((k + 0.5) / n)
                 for s in (1.9, -1.9):
                     lamps.append(tuple(q + side * s + Vector((0, 0, 2.5))))
-    for sx in (1, -1):                                                # and either side of the doorway out of the room under the tomb
-        lamps.append((sx * 2.35, CHAMBER - 0.3, D["floor_top"] + 2.2))
+    for quarter in range(4):                                          # and in the crypt, either side of each doorway out, and on the piers between its arms
+        for x, y in ((2.75, ARM_END - 0.3), (-2.75, ARM_END - 0.3), (ARM - 0.3, 5.6), (0.3 - ARM, 5.6)):
+            for _ in range(quarter):
+                x, y = -y, x
+            lamps.append((x, y, D["floor_top"] + 2.1))
     return lamps
 
 def star_holes():
@@ -618,6 +650,15 @@ def build():
     cutters = [temp_obj(f"cut_passage{i}", passage(leg)) for i, leg in enumerate(passages())]
     for c_ in cutters:
         boolean(drum, c_, solver="MANIFOLD")
+    # The wall the cut bares is one sheet from the terrace to the cornice, with corners only at its head
+    # and foot, so light baked into its corners was drawn out into upright streaks: courses of corners
+    # every few metres let the shade under the overhang fall off as it does.
+    bm = bmesh.new(); bm.from_mesh(drum.data)
+    for k in range(13):
+        faces = [f for f in bm.faces if f.material_index == i_core]
+        geom = faces + list({e for f in faces for e in f.edges}) + list({v for f in faces for v in f.verts})
+        bmesh.ops.bisect_plane(bm, geom=geom, dist=0.001, plane_co=(0, 0, D["platform_top"] + 2.9 * (k + 1)), plane_no=(0, 0, 1))
+    bm.to_mesh(drum.data); bm.free()
     # frieze + dentil core + corona (continuous: the 'bridge' across the front opening)
     fr = mesh_obj("Drum frieze", annulus(60, D["drum_frieze_R"], D["drum_wall_top"], 45.4), C_MON, M["dressed"])
     boolean(fr, sph71)
@@ -698,12 +739,24 @@ def build():
         boolean(dais, c_, solver="MANIFOLD")                      # the two flights climb up inside it
         kill(c_)
     ft = D["floor_top"]
-    # the room under the tomb, and its way out at the back: two cuts, since overlapping boxes in one cutter leave a slab where they overlap
-    for hollow in (box(-CHAMBER, CHAMBER, -CHAMBER, CHAMBER, ft - 0.05, ft + CHAMBER_H),
-                   box(-1.2, 1.2, CHAMBER - 0.2, D["dais_base_half"] + 1.0, ft - 0.05, ft + 2.9)):
+    # the crypt under the tomb, a cross, and a way out through each face: one cut at a time, since overlapping boxes in one cutter leave a slab where they overlap
+    hollows = [box(-ARM_END, ARM_END, -ARM, ARM, ft - 0.05, ft + CRYPT_H), box(-ARM, ARM, -ARM_END, ARM_END, ft - 0.05, ft + CRYPT_H)]
+    for quarter in range(4):
+        x0, x1, y0, y1 = turned((-DOOR_W, DOOR_W, ARM_END - 0.2, D["dais_base_half"] + 1.0), quarter)
+        hollows.append(box(x0, x1, y0, y1, ft - 0.05, ft + DOOR_H))
+    for hollow in hollows:
         cut = temp_obj("cut_crypt", hollow)
         boolean(dais, cut, solver="MANIFOLD"); kill(cut)
+    # the flights' walls are ashlar all the way up, like the passages they come from, whatever they were cut through
+    for ob in (plain, dais):
+        ob.data.materials.append(M["ashlar"])
+        i_ashlar = len(ob.data.materials) - 1
+        for p in ob.data.polygons:
+            c_ = p.center
+            if D["passage_z"] - 0.5 < c_.z < ft - 0.03 and p.normal.z < 0.99 and min(abs(c_.x), abs(c_.y)) < D["passage_half_w"] + 0.05 and max(abs(c_.x), abs(c_.y)) < RISE_FOOT + 1:
+                p.material_index = i_ashlar
     mesh_obj("Passage stairs", passage_stairs(), C_MON, M["dressed"])
+    mesh_obj("Crypt parapets", crypt_parapets(), C_MON, M["dressed"])
     sz = D["mound_top"]
     sar = sarcophagus(sz)
     mesh_obj("Sarcophagus of Newton", sar, C_MON, M["dressed"])
