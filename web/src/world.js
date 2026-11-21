@@ -11,6 +11,7 @@ import { noise3, rng, smooth, SCALE, SHADE, OCCLUDERS, cryptPlan, passageDepth }
 import { makeBirds } from './birds.js';
 import { makeVisitors } from './visitors.js';
 import { makeSunshafts } from './sunshafts.js';
+import { makeClouds, DOME } from './clouds.js';
 
 export const CENTER = new THREE.Vector3(0, 73.5, 0);        // sphere centre
 
@@ -801,51 +802,28 @@ function makeBasin() {
 
 function makeSky(renderer, scene) {
   const sky = new Sky();
-  // Its clouds are redrawn: the field is billowed by folding it on itself and carried to five octaves, so
-  // an edge is cauliflower and not a smear; each cloud is lit from the sun's side, by how much cloud lies
-  // between it and the sun, so it has a bright flank, a grey one and a darker base; and far above them
-  // lies a thin sheet of cirrus combed into streaks.
+  // Its clouds are looked up in the picture of them that clouds.js paints, and coloured here by the sun
+  // and sky of the moment: white where the sun reaches them, blue-grey in their own shade.
+  const clouds = makeClouds(renderer);
+  Object.assign(sky.material.uniforms, { cloudA: clouds.a, cloudB: clouds.b, cloudFade: clouds.fade, cloudTexel: clouds.texel });
   sky.material.onBeforeCompile = (s) => {
-    let f = s.fragmentShader;
-    f = f.replace('// constants for atmospheric scattering', `float billow( vec2 p, float drift, int octaves ) {
-			const mat2 turn = mat2( 0.8, 0.6, -0.6, 0.8 );
-			float result = 0.0, amplitude = 1.0;
-			for ( int i = 0; i < octaves; i ++ ) { result += amplitude * noise( p ); amplitude *= 0.58; p = turn * p * 2.07 + drift; }
-			return result;
-		}
-		// constants for atmospheric scattering`);
+    let f = s.fragmentShader.replace('uniform float showSunDisc;', 'uniform float showSunDisc; uniform sampler2D cloudA, cloudB; uniform float cloudFade, cloudTexel;');
     const from = f.indexOf('// Clouds'), to = f.indexOf('gl_FragColor = vec4( texColor, 1.0 );');
-    f = f.slice(0, from) + `if ( direction.y > 0.0 && cloudCoverage > 0.0 ) {
-				float dayFactor = smoothstep( -0.08, 0.3, vSunDirection.y );
-				vec3 sunColor = vSunE * Fex * 0.22 * 0.04, skyAmbient = Lin * 0.04 + vec3( 0.0, 0.0003, 0.00075 );
+    f = f.slice(0, from) + `if ( direction.y > 0.0 ) {
+				vec2 dome = 0.5 + direction.xz / ( 1.0 + direction.y ) / ${DOME.toFixed(2)};
+				vec4 cloud = vec4( 0.0 );                                  // sunlit, skylit, cirrus, cover: four taps, which smooths the grain its marching leaves
+				for ( int k = 0; k < 4; k ++ ) { vec2 at = dome + ( vec2( k & 1, k >> 1 ) - 0.5 ) * cloudTexel; cloud += 0.25 * mix( texture2D( cloudA, at ), texture2D( cloudB, at ), cloudFade ); }
+				float dayFactor = max( smoothstep( -0.08, 0.3, vSunDirection.y ), 0.03 );
+				// the sun's light on them is the sun's own colour, white by day and warm when it is low, whichever way one looks
+				vec3 sunLight = vSunE * 0.22 * 0.04 * 0.42 * mix( vec3( 1.0, 0.6, 0.36 ), vec3( 1.0, 0.97, 0.93 ), smoothstep( 0.02, 0.4, vSunDirection.y ) );
+				vec3 skyAmbient = Lin * 0.04 + vec3( 0.0, 0.0003, 0.00075 ), skyGrey = mix( vec3( dot( skyAmbient, vec3( 0.3, 0.59, 0.11 ) ) ), skyAmbient, 0.08 );
 				float silver = clamp( 0.51 / pow( 1.49 - cosTheta * 1.4, 1.5 ), 0.0, 3.0 );
-				float horizonFade = smoothstep( 0.0, 0.03 + 0.06 * cloudElevation, direction.y );
-
-				vec2 high = direction.xz / ( direction.y + 0.12 ) * cloudScale * 520.0 + time * cloudSpeed * 90.0;
-				float streak = billow( vec2( high.x * 0.3 + high.y * 0.18, high.y * 2.2 - high.x * 0.3 ), 0.0, 4 ) * 0.5 + 0.5;
-				float cirrus = smoothstep( 0.5, 1.0, streak ) * smoothstep( 0.4, 0.75, noise( high * 0.2 + 11.0 ) * 0.5 + 0.5 ) * 0.42 * horizonFade;
-				vec3 cirrusColor = ( skyAmbient * 0.6 + vec3( dot( sunColor, vec3( 0.3, 0.59, 0.11 ) ) ) * ( 2.8 + 0.5 * silver ) ) * max( dayFactor, 0.03 );
-				texColor = mix( texColor, mix( texColor, cirrusColor, Fex ), cirrus );
-
-				vec2 cloudUV = direction.xz / ( direction.y * mix( 1.0, 0.1, cloudElevation ) ) * cloudScale + time * cloudSpeed;
-				float evolve = time * cloudSpeed * 300.0;
-				vec2 q = cloudUV * 1000.0;
-				q += 0.35 * vec2( noise( q * 0.6 + 3.1 ), noise( q * 0.6 + 7.7 ) );
-				float threshold = 1.0 - clamp( cloudCoverage + ( noise( cloudUV * 300.0 ) * 0.37 ) * 0.6, 0.0, 1.0 );
-				float depth = clamp( billow( q, evolve, 5 ) * 0.57 + 0.5, 0.0, 1.0 ) - threshold;
-				if ( depth > 0.0 ) {
-					vec2 toSun = normalize( vSunDirection.xz + vec2( 1e-4 ) ) * 0.3;
-					float before = max( 0.0, clamp( billow( q + toSun, evolve, 3 ) * 0.6 + 0.5, 0.0, 1.0 ) - threshold );
-					float lit = exp( before * -9.0 ), thick = smoothstep( 0.0, 0.35, depth );
-					// white in the sun and blue-grey in its own shade: the sun's light on it keeps a little of its warmth, the sky's a little of its blue
-					vec3 sunWhite = mix( vec3( dot( sunColor, vec3( 0.3, 0.59, 0.11 ) ) ), sunColor, 0.2 ), skyGrey = mix( vec3( dot( skyAmbient, vec3( 0.3, 0.59, 0.11 ) ) ), skyAmbient, 0.45 );
-					vec3 cloudColor = skyGrey * mix( 1.0, 0.65, thick ) + sunWhite * mix( 0.25, 3.6, lit ) * mix( 1.0, 0.6, thick );
-					cloudColor += sunWhite * silver * ( 1.0 - smoothstep( 0.0, 0.08, depth ) ) * 0.5;
-					cloudColor *= max( dayFactor, 0.03 );
-					float alpha = ( 1.0 - exp( depth * cloudDensity * -24.0 ) ) * horizonFade;
-					texColor -= L0 * 0.04 * alpha;
-					texColor = mix( texColor, mix( texColor, cloudColor, Fex ), alpha );
-				}
+				vec3 air = pow( Fex, vec3( 0.12 ) );                       // only the air below the clouds lies between them and the eye: an eighth of it
+				vec3 cirrusColor = ( skyAmbient * 0.5 + sunLight * ( 2.4 + 0.5 * silver ) ) * dayFactor;
+				texColor = mix( texColor, mix( texColor, cirrusColor, pow( Fex, vec3( 0.6 ) ) ), cloud.b );
+				vec3 cloudColor = ( sunLight * cloud.r * ( 4.2 + 1.2 * silver * ( 1.0 - cloud.a ) ) + skyGrey * cloud.g * 0.7 ) * dayFactor;
+				texColor -= L0 * 0.04 * cloud.a;
+				texColor += air * ( cloudColor - texColor * cloud.a );
 			}
 			` + f.slice(to);
     // the model's sky is as bright as the real one, which the camera's exposure for the stone would burn
@@ -860,7 +838,9 @@ function makeSky(renderer, scene) {
   const u = sky.material.uniforms;
   u.turbidity.value = 2.6; u.rayleigh.value = 2.6; u.mieCoefficient.value = 0.0035; u.mieDirectionalG.value = 0.8;
   u.sunPosition.value.copy(SUN);
-  u.cloudCoverage.value = 0.37; u.cloudDensity.value = 1.4; u.cloudScale.value = 0.0004; u.cloudElevation.value = 0.42;
+  u.cloudCoverage.value = 0;                      // its own flat clouds are not drawn: see clouds.js
+  clouds.whole(SUN, 0);
+  sky.clouds = clouds;
   const envScene = new THREE.Scene();
   envScene.add(sky);
   const pmrem = new THREE.PMREMGenerator(renderer);
@@ -1373,6 +1353,7 @@ export async function loadWorld(renderer, onProgress) {
   const showVault = (on) => { for (const o of vaults) o.visible = on; figures.visible = on; dark.visible = !on; };
   const setQuality = (q) => {
     GRAIN.value = q.glow ? 10 : 7;
+    sky.clouds.setSize(...(q.glow ? [1536, 72, 96] : q.post ? [896, 56, 160] : [640, 44, 240]));
     if (sun.shadow.mapSize.x !== q.shadow) { sun.shadow.mapSize.setScalar(q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
     water.visible = q.mirror > 0; stillWater.visible = !water.visible;
     if (q.mirror) water.getRenderTarget().setSize(q.mirror, q.mirror);
@@ -1382,6 +1363,6 @@ export async function loadWorld(renderer, onProgress) {
   };
   // what the shade in corners is measured from: the stone and the ground, solid and lit as stone
   scene.traverse((o) => { if (o.isMesh && !o.isInstancedMesh && !o.isSkinnedMesh && o.material.isMeshStandardMaterial && !o.material.alphaTest && !o.material.transparent) o.layers.enable(OCCLUDERS); });
-  return { loadDetail, birds, scene, bvh, trees, showVault, setQuality, water, sky, fire, visitors, sun, setSun, refresh, shadowsClose, lamps, shafts, tomb, sunStrength: () => sunStrength };
+  return { grain: GRAIN, loadDetail, birds, scene, bvh, trees, showVault, setQuality, water, sky, fire, visitors, sun, setSun, refresh, shadowsClose, lamps, shafts, tomb, sunStrength: () => sunStrength };
 
 }
