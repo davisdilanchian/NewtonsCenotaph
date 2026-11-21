@@ -2,6 +2,8 @@
 // a star or the sky can be far brighter than white, and that brightness spreads a little into what is
 // round it, as it does in an eye or a lens. Then one pass sets the exposure, darkens the corners
 // slightly, and adds a grain finer than a grey level, which keeps the dark vault from banding.
+// Where the machine can afford it, corners and crevices are darkened as the sky's light fails to reach
+// into them: ambient occlusion, measured from the depth of the picture at half its size.
 import * as THREE from 'three';
 
 const VERT = 'varying vec2 vUv; void main(){ vUv = position.xy * 0.5 + 0.5; gl_Position = vec4(position.xy, 0.0, 1.0); }';
@@ -20,7 +22,30 @@ export function makePost(renderer) {
   const pass = (fragmentShader, uniforms, extra = {}) => new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader, uniforms, depthTest: false, depthWrite: false, toneMapped: false, ...extra });
   const image = (w, h, samples = 0, depthBuffer = false) => new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples, depthBuffer, stencilBuffer: depthBuffer, magFilter: THREE.LinearFilter, minFilter: THREE.LinearFilter });
 
-  const target = image(2, 2, 4, true), levels = Array.from({ length: LEVELS }, () => image(2, 2));
+  const target = image(2, 2, 4, true), levels = Array.from({ length: LEVELS }, () => image(2, 2)), shade = image(2, 2);
+  target.depthTexture = new THREE.DepthTexture(2, 2, THREE.FloatType);
+  target.depthTexture.format = THREE.DepthStencilFormat;
+  const view = { proj: { value: new THREE.Matrix4() }, projInv: { value: new THREE.Matrix4() } }, reversed = { value: 0 }, depthTexel = { value: new THREE.Vector2() };
+  // each point looks out over a small hemisphere, about a stride across up close and wider with distance,
+  // and counts how much of it the picture's own surfaces fill
+  const occlusion = pass(`uniform sampler2D depth; uniform mat4 proj, projInv; uniform float reversed; uniform vec2 texel; varying vec2 vUv;
+    vec3 at(vec2 uv) { float d = texture2D(depth, uv).r; vec4 v = projInv * vec4(uv * 2.0 - 1.0, reversed > 0.5 ? d : d * 2.0 - 1.0, 1.0); return v.xyz / v.w; }
+    void main() {
+      float d = texture2D(depth, vUv).r;
+      if (reversed > 0.5 ? d <= 0.0 : d >= 1.0) { gl_FragColor = vec4(1.0); return; }
+      vec3 p = at(vUv), n = normalize(cross(at(vUv + vec2(texel.x, 0.0)) - p, at(vUv + vec2(0.0, texel.y)) - p));
+      if (dot(n, p) > 0.0) n = -n;
+      vec3 t = normalize(cross(n, abs(n.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0))), b = cross(n, t);
+      float radius = clamp(-p.z * 0.05, 0.8, 12.0), spin = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))), hidden = 0.0;
+      for (int i = 0; i < 8; i++) {
+        float f = (float(i) + spin) / 8.0, a = float(i) * 2.39996 + spin * 6.2832, r = sqrt(f);
+        vec3 s = p + radius * (t * cos(a) * r + b * sin(a) * r + n * (0.2 + 0.8 * fract(f * 7.31 + spin)));
+        vec4 c = proj * vec4(s, 1.0);
+        vec2 uv = c.xy / c.w * 0.5 + 0.5;
+        float z = at(uv).z;
+        hidden += step(s.z + 0.02 * radius, z) * smoothstep(0.0, 1.0, radius / abs(p.z - z));
+      }
+      gl_FragColor = vec4(vec3(pow(1.0 - hidden / 8.0, 1.8)), 1.0); }`, { depth: { value: target.depthTexture }, proj: view.proj, projInv: view.projInv, reversed, texel: depthTexel });
   const src = { value: null }, texel = { value: new THREE.Vector2() }, first = { value: 0 };
   // down: each level is the one above at half the size, through a soft 4-tap box; the first weighs
   // each tap down by its own brightness, so one glinting pixel does not flicker across the picture
@@ -35,8 +60,12 @@ export function makePost(renderer) {
       s += (texture2D(src, vUv + texel * vec2(-1.0, 0.0)).rgb + texture2D(src, vUv + texel * vec2(1.0, 0.0)).rgb + texture2D(src, vUv + texel * vec2(0.0, -1.0)).rgb + texture2D(src, vUv + texel * vec2(0.0, 1.0)).rgb) * 2.0;
       s += texture2D(src, vUv + texel * vec2(-1.0, -1.0)).rgb + texture2D(src, vUv + texel * vec2(1.0, -1.0)).rgb + texture2D(src, vUv + texel * vec2(-1.0, 1.0)).rgb + texture2D(src, vUv + texel * vec2(1.0, 1.0)).rgb;
       gl_FragColor = vec4(s / 16.0, 1.0); }`, { src, texel }, { blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendEquation: THREE.AddEquation });
-  const final = pass(`uniform sampler2D scene, spread; uniform float amount, time; varying vec2 vUv;
+  const final = pass(`uniform sampler2D scene, spread, shade; uniform float amount, time, shadeAmount, shadeView; uniform vec2 shadeTexel; varying vec2 vUv;
     void main(){ vec3 c = texture2D(scene, vUv).rgb;
+      float occ = 0.25 * (texture2D(shade, vUv + shadeTexel * vec2(-0.5, -0.5)).r + texture2D(shade, vUv + shadeTexel * vec2(0.5, -0.5)).r
+                        + texture2D(shade, vUv + shadeTexel * vec2(-0.5, 0.5)).r + texture2D(shade, vUv + shadeTexel * vec2(0.5, 0.5)).r);
+      c *= mix(1.0, occ, shadeAmount);
+      if (shadeView > 0.5) c = vec3(occ) * 0.5;
       c = mix(c, texture2D(spread, vUv).rgb * ${(1 / LEVELS).toFixed(3)}, amount);
       vec2 q = vUv - 0.5; c *= 1.0 - 0.34 * smoothstep(0.25, 0.95, dot(q, q) * 2.0);
       gl_FragColor = vec4(c, 1.0);
@@ -48,7 +77,7 @@ export function makePost(renderer) {
       gl_FragColor.rgb += mix(vec3(-0.012, 0.0, 0.016), vec3(0.022, 0.008, -0.022), smoothstep(0.2, 0.8, g)) * smoothstep(0.02, 0.18, g);   // a print's split: cool shade, warm light; black stays black
       float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy + fract(time) * vec2(37.0, 17.0), vec2(0.06711056, 0.00583715))));
       gl_FragColor.rgb += (n - 0.5) * (1.0 / 160.0 + 0.022 * g * (1.0 - g)); }`,
-    { scene: { value: target.texture }, spread: { value: levels[0].texture }, amount: { value: 0.07 }, time: { value: 0 } }, { toneMapped: true });
+    { scene: { value: target.texture }, spread: { value: levels[0].texture }, shade: { value: shade.texture }, shadeTexel: { value: new THREE.Vector2() }, shadeAmount: { value: 0 }, shadeView: { value: new URLSearchParams(location.search).has('aoview') ? 1 : 0 }, amount: { value: 0.07 }, time: { value: 0 } }, { toneMapped: true });
 
   const size = new THREE.Vector2();
   const draw = (material, to) => { quad.material = material; renderer.setRenderTarget(to); renderer.render(stage, flat); };
@@ -66,6 +95,8 @@ export function makePost(renderer) {
       target.setSize(size.x, size.y);
       let w = size.x, h = size.y;
       for (const l of levels) { w = Math.max(2, w >> 1); h = Math.max(2, h >> 1); l.setSize(w, h); }
+      shade.setSize(Math.max(2, size.x >> 1), Math.max(2, size.y >> 1));
+      final.uniforms.shadeTexel.value.set(1 / shade.width, 1 / shade.height);
     },
     render(scene, camera, time = 0) {
       if (!post.on) { renderer.setRenderTarget(null); renderer.render(scene, camera); return; }
@@ -77,6 +108,13 @@ export function makePost(renderer) {
         levels.forEach((l, i) => { src.value = from.texture; texel.value.set(0.5 / from.width, 0.5 / from.height); first.value = i ? 0 : 1; draw(down, l); from = l; });
         for (let i = LEVELS - 1; i > 0; i--) { src.value = levels[i].texture; texel.value.set(1 / levels[i].width, 1 / levels[i].height); draw(up, levels[i - 1]); }
       }
+      if (post.glow) {                                // the machines that can spread light can also afford the shade in the corners
+        view.proj.value.copy(camera.projectionMatrix); view.projInv.value.copy(camera.projectionMatrixInverse);
+        reversed.value = renderer.state.buffers.depth.getReversed() ? 1 : 0;
+        depthTexel.value.set(2 / target.width, 2 / target.height);
+        draw(occlusion, shade);
+      }
+      final.uniforms.shadeAmount.value = post.glow ? 0.85 : 0;
       final.uniforms.amount.value = post.glow ? 0.07 : 0;
       final.uniforms.time.value = time;
       draw(final, null);

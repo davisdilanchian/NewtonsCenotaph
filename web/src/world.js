@@ -97,7 +97,17 @@ function weathered(mat, { streaks = 1, courses = false, level = 1, loose = false
     s.uniforms.skyLevel = SKY_LEVEL;
     s.vertexShader = s.vertexShader.replace('#include <common>', `#include <common>\nvarying vec3 vWP, vBaked; attribute vec3 baked;${carved ? ' attribute float cavity; varying float vCavity;' : ''}`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>\nvWP = (modelMatrix * vec4(position, 1.0)).xyz; vBaked = baked;${carved ? ' vCavity = cavity;' : ''}`);
-    s.fragmentShader = s.fragmentShader.replace('#include <lights_fragment_maps>', `#include <lights_fragment_maps>
+    s.fragmentShader = s.fragmentShader.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+      {   // the stone's own grain: pitted and uneven at a hand's scale, as limestone is, gone by a hundred metres
+        float near = 1.0 - smoothstep(25.0, 110.0, length(vViewPosition));
+        if (near > 0.0) {
+          float h = 0.55 * vn(vWP * 2.6) + 0.3 * vn(vWP * 7.3 + 3.1) + 0.15 * vn(vWP * 19.0 + 7.7);
+          vec3 sx = dFdx(-vViewPosition), sy = dFdy(-vViewPosition), r1 = cross(sy, normal), r2 = cross(normal, sx);
+          float det = dot(sx, r1) * faceDirection;
+          normal = normalize(abs(det) * normal - sign(det) * (dFdx(h) * r1 + dFdy(h) * r2) * 0.035 * near);
+        }
+      }`)
+      .replace('#include <lights_fragment_maps>', `#include <lights_fragment_maps>
       #ifdef USE_ENVMAP
         iblIrradiance = vec3(0.0);                    // diffuse sky comes from the path traced bake instead
         radiance = vec3(0.0);                         // and the sky isn't reflected, or it would shine indoors too
@@ -126,7 +136,7 @@ function weathered(mat, { streaks = 1, courses = false, level = 1, loose = false
       ${carved ? `float hollow = clamp(vCavity, 0.0, 1.0), proud = clamp(-vCavity, 0.0, 1.0);          // carving: grime gathers in the cuts, and weather pales what stands proud
       diffuseColor.rgb = mix(diffuseColor.rgb * (1.0 + 0.3 * proud), diffuseColor.rgb * vec3(0.3, 0.29, 0.26), 0.85 * hollow * hollow + 0.3 * hollow);` : ''}
       float lng = atan(vWP.z, vWP.x), upright = 1.0 - abs(normalize(cross(dFdx(vWP), dFdy(vWP))).y);
-      diffuseColor.rgb *= 1.0 - ${streaks.toFixed(1)} * 0.2 * upright * upright * smoothstep(0.52, 0.8, fb(vec3(lng * 46.0, vWP.y * 0.016, 2.0)));
+      diffuseColor.rgb *= 1.0 - ${streaks.toFixed(1)} * 0.1 * upright * upright * smoothstep(0.55, 0.85, fb(vec3(lng * 160.0, vWP.y * 0.11, 2.0))) * smoothstep(0.35, 0.65, vn(vWP * 0.05));   // rain marks, short and in patches: long bands read as a stretched texture
       ${courses ? `vec3 sd = normalize(vWP - vec3(0.0, 73.5, 0.0));
       float lat = asin(sd.y) * 75.0, H = ${(1.5 / SCALE).toFixed(3)}, row = floor(lat / H);
       float along = lng * 75.0 * cos(asin(sd.y)) / (H * 2.4) + 0.5 * mod(row, 2.0);
@@ -787,7 +797,7 @@ function makeLamps(buffer) {
  * short of each opening, as on a star chart, and their Latin names in Roman capitals.
  */
 function makeFigures(list) {
-  const R = 66.9, HALF = 0.11, GAP = 1.1, LETTER = 1.6, pos = [], uv = [], nor = [];
+  const R = 66.9, HALF = 0.065, GAP = 1.1, LETTER = 1.6, pos = [], uv = [], nor = [];
   const dir = (d) => new THREE.Vector3(d[0], d[2], -d[1]).normalize();
   const solid = [0.996, 0.002];                     // a white corner of the lettering atlas
   const quad = (a, b, c, d, ua, ub, uc, ud) => {        // corners relative to the sphere's centre
@@ -843,7 +853,15 @@ function makeFigures(list) {
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   const atlas = new THREE.CanvasTexture(canvas);
   atlas.colorSpace = THREE.SRGBColorSpace; atlas.anisotropy = 4;
-  const paint = weathered(new THREE.MeshStandardMaterial({ color: new THREE.Color(0.8, 0.6, 0.3), map: atlas, alphaTest: 0.35, roughness: 0.6, metalness: 0 }), { streaks: 0 });
+  // gilt: thin gold leaf, dim against the black paint, catching a glint here and there as you move
+  const paint = weathered(new THREE.MeshStandardMaterial({ color: new THREE.Color(0.85, 0.55, 0.16), map: atlas, alphaTest: 0.35, roughness: 0.6, metalness: 0 }), { streaks: 0, level: 0.35 });
+  const painted = paint.onBeforeCompile;
+  paint.onBeforeCompile = (s) => {
+    painted(s);
+    s.fragmentShader = s.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      float leaf = vn(vWP * 9.0 + normalize(vViewPosition) * 6.0);
+      totalEmissiveRadiance += diffuseColor.rgb * vec3(1.0, 0.72, 0.36) * (0.09 + 0.12 * smoothstep(0.7, 0.95, leaf));   // the leaf's own warmth, whatever light reaches it`);
+  };
   return new THREE.Mesh(g, paint);
 }
 
@@ -1006,15 +1024,15 @@ export async function loadWorld(renderer, onProgress) {
   const scene = new THREE.Scene();
   scene.fog = new THREE.FogExp2(0xc9d2dc, 0.0006);   // aerial haze at the ground; its colour follows the sun
 
-  const std = (o) => new THREE.MeshStandardMaterial({ roughness: 0.82, metalness: 0, ...o });
+  const std = (o) => new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0, ...o });   // matte: weathered limestone has no sheen
   const LIMESTONE = 0xfbf3ef;      // warms and tones down the neutral stone textures
   const nS = (v) => new THREE.Vector2(v, v);
   const ashlar = weathered(std({ color: LIMESTONE, map: T('ashlar', true), normalMap: T('ashlar_n'), normalScale: nS(0.9) }));
   const stone = T('stone', true), stoneN = T('stone_n');
-  const dressed = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.5), roughness: 0.74 }), { streaks: 0.4, turn: true });
+  const dressed = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.5), roughness: 0.9 }), { streaks: 0.4, turn: true });
   const lionStone = weathered(std({ color: 0xefe3cc, map: stone, normalMap: stoneN, normalScale: nS(0.35), roughness: 0.66 }), { streaks: 0.6, carved: true, turn: true });   // a finer, paler block, cut deep
   const boreStone = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.8 }), { streaks: 0, level: 1.5, turn: true });   // the bake's vertices are too few for these narrow bores
-  const sphere = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.25), roughness: 0.72, envMapIntensity: 0.45 }), { courses: true, turn: true });
+  const sphere = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.25), roughness: 0.9, envMapIntensity: 0.45 }), { courses: true, turn: true });
   const vault = weathered(std({ color: new THREE.Color(0.05, 0.05, 0.053), map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.88, dithering: true }), { courses: true, streaks: 0 });   // painted black, so the stars stand out
   const paving = weathered(std({ color: LIMESTONE, map: T('paving', true), normalMap: T('paving_n'), normalScale: nS(0.7) }), { streaks: 0 });
   const gravel = weathered(std({ color: new THREE.Color(1.22, 1.08, 0.88), map: T('gravel', true), normalMap: T('gravel_n'), normalScale: nS(0.3), roughness: 0.94 }), { streaks: 0, loose: true });

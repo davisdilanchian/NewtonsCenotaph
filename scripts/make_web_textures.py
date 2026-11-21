@@ -92,11 +92,13 @@ LIME = (0.80, 0.755, 0.665)          # Lutetian limestone, sRGB
 masonry(1536, 6, 12, 0.035, 0.045, LIME, (0.55, 0.52, 0.46), 7.0, "ashlar")
 masonry(1024, 4, 8, 0.02, 0.05, (0.83, 0.79, 0.71), (0.5, 0.47, 0.42), 2.5, "paving")
 
-# dressed stone: almost plain, faint rain streaks
+# dressed stone: a rough, even grain the same in every direction, soft blotches and small pits; the rain
+# streaks it once had were drawn stretched, and on the great walls read as a stretched texture
 n = 1024
-g, s, f = fractal(n, 2.2), fractal(n, 1.8, 1, 0.12), fractal(n, 0.9)
-write("stone", tint(LIME, 0.93 + 0.1 * (g - 0.5) + 0.1 * (s - 0.5) + 0.03 * (f - 0.5)))
-write("stone_n", normal_map(0.5 * g + 0.25 * f, 0.9))
+g, s, f = fractal(n, 2.2), fractal(n, 0.6), fractal(n, 0.9)     # three draws, in order, so every later texture is unchanged
+pits = smooth(0.7, 0.92, s)
+write("stone", tint(LIME, 0.95 + 0.12 * (g - 0.5) + 0.07 * (f - 0.5) - 0.1 * pits))
+write("stone_n", normal_map(0.4 * g + 0.4 * f - 0.35 * pits, 1.6))
 
 # gravel
 g, m = fractal(n, 0.55), fractal(n, 2.0)
