@@ -13,6 +13,34 @@ import { makeVisitors } from './visitors.js';
 import { makeSunshafts } from './sunshafts.js';
 
 export const CENTER = new THREE.Vector3(0, 73.5, 0);        // sphere centre
+
+// Aerial haze, as air holds it: thickest at the ground and thinning with height, so the far meadow
+// pales while the top of the sphere, 150 m up, stays clear. The density along each line of sight is
+// integrated exactly from the eye's height to the point's. fogDensity is its thickness at the ground.
+const HAZE_HEIGHT = 120;
+THREE.ShaderChunk.fog_pars_vertex = '#ifdef USE_FOG\n varying float vFogDepth; varying float vFogY;\n#endif';
+THREE.ShaderChunk.fog_vertex = `#ifdef USE_FOG
+  vFogDepth = length(mvPosition.xyz);
+  vFogY = dot(vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]), mvPosition.xyz - viewMatrix[3].xyz);   // the point's height in the world
+#endif`;
+THREE.ShaderChunk.fog_pars_fragment = `#ifdef USE_FOG
+  uniform vec3 fogColor; varying float vFogDepth; varying float vFogY;
+  #ifdef FOG_EXP2
+    uniform float fogDensity;
+  #else
+    uniform float fogNear; uniform float fogFar;
+  #endif
+#endif`;
+THREE.ShaderChunk.fog_fragment = `#ifdef USE_FOG
+  #ifdef FOG_EXP2
+    float fogB = ${(1 / HAZE_HEIGHT).toFixed(5)}, fogH0 = max(cameraPosition.y, 0.0), fogH1 = max(vFogY, 0.0), fogDh = fogH1 - fogH0;
+    float fogAlong = abs(fogDh) > 0.5 ? (exp(-fogB * fogH0) - exp(-fogB * fogH1)) / (fogB * fogDh) : exp(-fogB * fogH0);
+    float fogFactor = 1.0 - exp(-fogDensity * vFogDepth * fogAlong);
+  #else
+    float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
+  #endif
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, fogFactor);
+#endif`;
 export const SUN = new THREE.Vector3();
 
 /** Sun across the day, u from 0 to 1: rising on the left, over the front, setting on the right. */
@@ -64,7 +92,7 @@ function load(name, srgb, renderer, manager) {
 const SKY_LEVEL = { value: 1 };                 // follows the height of the sun
 
 /** Weather that repeats nowhere: broad tonal drift, rain streaks, and the sphere's stone courses. */
-function weathered(mat, { streaks = 1, courses = false, level = 1, loose = false, carved = false } = {}) {
+function weathered(mat, { streaks = 1, courses = false, level = 1, loose = false, carved = false, turn = false } = {}) {
   mat.onBeforeCompile = (s) => {
     s.uniforms.skyLevel = SKY_LEVEL;
     s.vertexShader = s.vertexShader.replace('#include <common>', `#include <common>\nvarying vec3 vWP, vBaked; attribute vec3 baked;${carved ? ' attribute float cavity; varying float vCavity;' : ''}`)
@@ -74,7 +102,8 @@ function weathered(mat, { streaks = 1, courses = false, level = 1, loose = false
         iblIrradiance = vec3(0.0);                    // diffuse sky comes from the path traced bake instead
         radiance = vec3(0.0);                         // and the sky isn't reflected, or it would shine indoors too
       #endif
-      irradiance += vBaked * skyLevel * ${level.toFixed(3)};`)
+      vec3 bake = vBaked; float bakeL = dot(bake, vec3(0.3, 0.59, 0.11)), cool = clamp((bake.b - bake.r) / max(bakeL, 1e-4) * 3.0, 0.0, 1.0);
+      irradiance += mix(bake, vec3(bakeL), 0.7 * cool) * skyLevel * ${level.toFixed(3)};   // the sky's light in the bake, half its blue: shade is cool, not navy; the lamps' warmth is kept`)
       .replace('#include <common>', `#include <common>
       varying vec3 vWP, vBaked; uniform float skyLevel;${carved ? ' varying float vCavity;' : ''}
       float vh(vec3 p) { p = fract(p * 0.3183 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
@@ -85,6 +114,14 @@ function weathered(mat, { streaks = 1, courses = false, level = 1, loose = false
       .replace('#include <map_fragment>', `#include <map_fragment>
       ${loose ? `vec3 again = texture2D(map, mat2(0.8, 0.6, -0.6, 0.8) * vMapUv * 0.231 + 0.37).rgb;   // the same gravel turned and far larger, so no tile repeats
       diffuseColor.rgb = mix(diffuseColor.rgb, diffuse * again, 0.5) * (0.9 + 0.2 * fb(vWP * 0.9));` : ''}
+      #if defined(USE_MAP) && ${turn ? 1 : 0}
+        // the same texture again, turned and at nearly three times the size, laid over it in drifting
+        // patches: no tile lines up with the next, so the repeat can't be picked out. Only for plain stone:
+        // turned, the joints of ashlar or paving would cross their own courses
+        vec3 turned = diffuse * texture2D(map, mat2(0.72, 0.69, -0.69, 0.72) * vMapUv * 0.37 + vec2(0.31, 0.17)).rgb;
+        diffuseColor.rgb = mix(diffuseColor.rgb, turned, smoothstep(0.3, 0.7, vn(vWP * 0.045)) * 0.6);
+      #endif
+      diffuseColor.rgb = mix(vec3(dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11))), diffuseColor.rgb, 0.35) * 1.08;   // limestone is nearly white, its warmth light
       diffuseColor.rgb *= 0.8 + 0.3 * fb(vWP * 0.016) + 0.1 * fb(vWP * 0.13);
       ${carved ? `float hollow = clamp(vCavity, 0.0, 1.0), proud = clamp(-vCavity, 0.0, 1.0);          // carving: grime gathers in the cuts, and weather pales what stands proud
       diffuseColor.rgb = mix(diffuseColor.rgb * (1.0 + 0.3 * proud), diffuseColor.rgb * vec3(0.3, 0.29, 0.26), 0.85 * hollow * hollow + 0.3 * hollow);` : ''}
@@ -342,7 +379,10 @@ function splitPassages(g, tile) {
  */
 // One exposure serves the whole site, so the dark interior is set permanently to where the eye would
 // settle in it, rather than changing the camera as you cross a threshold.
-const SKY_FILL = 2.1;                        // how much stronger the sky's light in the open is than the bake has it
+// The interiors are tuned to the old exposure, kept; the open air is brought up to a photograph's
+// balance by raising everything that lights it (the sun, the sky, the bake's sky light, the haze) together.
+const OUTDOORS = 1.4;
+const SKY_FILL = 1.5 * OUTDOORS;                        // how much stronger the sky's light in the open is than the bake has it
 const INDOORS = 1000, PASSAGES = 5;      // the passages stay dim, so the eye has adjusted by the time it reaches the void
 
 // The vault is painted black, so almost all the light that bounces round the void comes off the floor
@@ -488,6 +528,7 @@ function makeTrees(buffer, foliage, scene) {
     const m = foliage.clone();
     m.defines = { LOD: lod };
     m.onBeforeCompile = (s) => {
+      foliage.onBeforeCompile(s);
       s.uniforms.bands = bands; s.uniforms.farBand = farBand;
       s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vTreeAt;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTreeAt = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xz;');
@@ -531,7 +572,7 @@ function makeTrees(buffer, foliage, scene) {
     const o = i * 6, t = { x: data[o], y: data[o + 1], z: data[o + 2], r: 1.35, v: i % VARIANTS };   // crowns nearly touch: the rows are hedges
     p.set(t.x, t.y, t.z); q.setFromAxisAngle(yAxis, data[o + 3]); s.set(data[o + 4], data[o + 5], data[o + 4]);
     m.compose(p, q, s).toArray(mats, i * 16);
-    tint.setHSL(0.275 + r() * 0.035, 0.3 + r() * 0.1, 0.27 + r() * 0.07).toArray(tints, i * 3);   // the grey green of cypress, no two alike
+    tint.setHSL(0.13 + r() * 0.05, 0.26 + r() * 0.08, 0.36 + r() * 0.07).toArray(tints, i * 3);   // the grey green of cypress, no two alike
     t.mid = t.y + 5.4 * data[o + 5];
     trunks.setMatrixAt(i, m);
     trees.push(t); hash.add(t);
@@ -608,7 +649,22 @@ function makeTrees(buffer, foliage, scene) {
     cp.setXYZ(i, x * k, y * k * 0.9, z * k);
   }
   crown.computeVertexNormals();
-  const woods = new THREE.InstancedMesh(crown, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 }), nWood);
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, envMapIntensity: 0.6 });
+  // a crown is clumps of leaves with shade between them, lit from above and dark underneath
+  woodMat.onBeforeCompile = (s) => {
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vLeafAt; varying float vUp;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLeafAt = (modelMatrix * instanceMatrix * vec4(position, 1.0)).xyz; vUp = position.y;');
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', `#include <common>
+      varying vec3 vLeafAt; varying float vUp;
+      float lh(vec3 p) { p = fract(p * 0.3183 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+      float ln(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(mix(lh(i), lh(i + vec3(1, 0, 0)), f.x), mix(lh(i + vec3(0, 1, 0)), lh(i + vec3(1, 1, 0)), f.x), f.y),
+                   mix(mix(lh(i + vec3(0, 0, 1)), lh(i + vec3(1, 0, 1)), f.x), mix(lh(i + vec3(0, 1, 1)), lh(i + vec3(1, 1, 1)), f.x), f.y), f.z); }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+      float clump = 0.6 * ln(vLeafAt * 0.45) + 0.4 * ln(vLeafAt * 1.3 + 7.0);
+      diffuseColor.rgb *= (0.45 + 0.85 * smoothstep(0.25, 0.75, clump)) * (0.55 + 0.45 * smoothstep(-0.9, 0.8, vUp));`);
+  };
+  const woods = new THREE.InstancedMesh(crown, woodMat, nWood);
   for (let i = 0; i < nWood; i++) {
     const o = i * 4, sc = wood[o + 3] * 1.7;
     p.set(wood[o], wood[o + 1], wood[o + 2]); q.identity(); s.setScalar(sc);
@@ -650,7 +706,7 @@ function makeGround(grassMap, grassNormal) {
        float patches = ff(vField * 0.21), sweeps = ff(vField * 0.011 + 3.0), tufts = fn(vField * 2.6);
        vec3 turf = mix(g1.rgb, g2.rgb, 0.55) * mix(vec3(0.6, 0.7, 0.5), vec3(1.0, 1.0, 0.86), patches);
        turf = mix(turf, turf * vec3(1.3, 1.08, 0.62), 0.6 * smoothstep(0.42, 0.72, sweeps));
-       diffuseColor.rgb *= turf * (0.84 + 0.2 * tufts) * vec3(0.8, 0.7, 0.6);`);
+       diffuseColor.rgb *= mix(vec3(dot(turf, vec3(0.3, 0.59, 0.11))), turf, 0.6) * (0.84 + 0.2 * tufts) * vec3(0.92, 0.82, 0.62);   // late summer: the meadow gone half to straw`);
   };
   const mesh = new THREE.Mesh(g, mat);
   mesh.receiveShadow = true;
@@ -688,16 +744,22 @@ function makeBasin() {
 
 function makeSky(renderer, scene) {
   const sky = new Sky();
+  // the model's sky is as bright as the real one, which the camera's exposure for the stone would burn
+  // to white: it is taken down to where a photograph exposed for sunlit stone holds it, a deep blue
+  sky.material.onBeforeCompile = (s) => { s.fragmentShader = s.fragmentShader.replace('threshold + 0.3', 'threshold + 0.12').replace('gl_FragColor = vec4( texColor, 1.0 );', `vec3 d = normalize(vWorldPosition - cameraPosition);
+    float low = 1.0 - smoothstep(0.0, 0.4, max(d.y, 0.0));                        // the pale band of haze at the horizon, kept blue
+    texColor = mix(vec3(dot(texColor, vec3(0.3, 0.59, 0.11))), texColor, 1.0 + 0.35 * low) * (1.0 - 0.22 * low);
+    gl_FragColor = vec4(texColor * ${(0.3 * OUTDOORS).toFixed(3)}, 1.0);`); };
   sky.scale.setScalar(16000);
   const u = sky.material.uniforms;
-  u.turbidity.value = 3.2; u.rayleigh.value = 1.3; u.mieCoefficient.value = 0.004; u.mieDirectionalG.value = 0.8;
+  u.turbidity.value = 1.8; u.rayleigh.value = 2.6; u.mieCoefficient.value = 0.0025; u.mieDirectionalG.value = 0.8;
   u.sunPosition.value.copy(SUN);
-  u.cloudCoverage.value = 0.34; u.cloudDensity.value = 0.42; u.cloudScale.value = 0.00024; u.cloudElevation.value = 0.42;
+  u.cloudCoverage.value = 0.4; u.cloudDensity.value = 1.4; u.cloudScale.value = 0.00018; u.cloudElevation.value = 0.42;
   const envScene = new THREE.Scene();
   envScene.add(sky);
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(envScene, 0, 1, 20000).texture;
-  scene.environmentIntensity = 0.42;
+  scene.environmentIntensity = 0.42 * OUTDOORS;
   pmrem.dispose();
   scene.add(sky);
   return sky;
@@ -942,24 +1004,32 @@ export async function loadWorld(renderer, onProgress) {
 
   placeSun(0.2);
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0xd3dbe3, 0.00045 * Math.sqrt(SCALE));   // aerial haze, none up close
+  scene.fog = new THREE.FogExp2(0xc9d2dc, 0.0006);   // aerial haze at the ground; its colour follows the sun
 
   const std = (o) => new THREE.MeshStandardMaterial({ roughness: 0.82, metalness: 0, ...o });
-  const LIMESTONE = 0xe6d6b8;      // warms and tones down the neutral stone textures
+  const LIMESTONE = 0xfbf3ef;      // warms and tones down the neutral stone textures
   const nS = (v) => new THREE.Vector2(v, v);
   const ashlar = weathered(std({ color: LIMESTONE, map: T('ashlar', true), normalMap: T('ashlar_n'), normalScale: nS(0.9) }));
   const stone = T('stone', true), stoneN = T('stone_n');
-  const dressed = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.5), roughness: 0.74 }), { streaks: 0.4 });
-  const lionStone = weathered(std({ color: 0xefe3cc, map: stone, normalMap: stoneN, normalScale: nS(0.35), roughness: 0.66 }), { streaks: 0.6, carved: true });   // a finer, paler block, cut deep
-  const boreStone = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.8 }), { streaks: 0, level: 1.5 });   // the bake's vertices are too few for these narrow bores
-  const sphere = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.25), roughness: 0.72, envMapIntensity: 0.45 }), { courses: true });
+  const dressed = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.5), roughness: 0.74 }), { streaks: 0.4, turn: true });
+  const lionStone = weathered(std({ color: 0xefe3cc, map: stone, normalMap: stoneN, normalScale: nS(0.35), roughness: 0.66 }), { streaks: 0.6, carved: true, turn: true });   // a finer, paler block, cut deep
+  const boreStone = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.8 }), { streaks: 0, level: 1.5, turn: true });   // the bake's vertices are too few for these narrow bores
+  const sphere = weathered(std({ color: LIMESTONE, map: stone, normalMap: stoneN, normalScale: nS(0.25), roughness: 0.72, envMapIntensity: 0.45 }), { courses: true, turn: true });
   const vault = weathered(std({ color: new THREE.Color(0.05, 0.05, 0.053), map: stone, normalMap: stoneN, normalScale: nS(0.3), roughness: 0.88, dithering: true }), { courses: true, streaks: 0 });   // painted black, so the stars stand out
   const paving = weathered(std({ color: LIMESTONE, map: T('paving', true), normalMap: T('paving_n'), normalScale: nS(0.7) }), { streaks: 0 });
   const gravel = weathered(std({ color: new THREE.Color(1.22, 1.08, 0.88), map: T('gravel', true), normalMap: T('gravel_n'), normalScale: nS(0.3), roughness: 0.94 }), { streaks: 0, loose: true });
   const soil = std({ map: T('soil', true), roughness: 0.97 });
   const leaves = T('cypress', true);
   const foliage = new THREE.MeshLambertMaterial({ map: leaves, normalMap: T('cypress_n'), normalScale: nS(1.0), vertexColors: true,   // matte: leaves don't mirror the sky
-                                                  emissive: 0x56665a, emissiveMap: leaves });                                          // this material ignores the sky, so its light is added here
+                                                  emissive: 0x55503c, emissiveMap: leaves });                                          // this material ignores the sky, so its light is added here
+  foliage.emissive.multiplyScalar(OUTDOORS);
+  // the leaf texture gives the grain of the sprays, and each tree's own tint their colour: dusty bronze
+  // and olive, as cypress reads in low sun, rather than the texture's green
+  foliage.onBeforeCompile = (s) => {
+    s.fragmentShader = s.fragmentShader
+      .replace('#include <map_fragment>', 'vec4 leaf = texture2D(map, vMapUv); diffuseColor *= vec4(vec3(dot(leaf.rgb, vec3(0.3, 0.59, 0.11)) * 1.6), leaf.a);')
+      .replace('#include <emissivemap_fragment>', 'totalEmissiveRadiance *= dot(texture2D(emissiveMap, vEmissiveMapUv).rgb, vec3(0.3, 0.59, 0.11)) * 1.6;');
+  };
   const grass = [T('grass', true), T('grass_n')];
   const MATS = {
     'Vault: pierced shell (star holes)': [vault, 12, true], Bore: [boreStone, 12 / SCALE], 'Limestone ashlar': [ashlar, 15.6 / SCALE], 'Limestone dressed': [dressed, 12 / SCALE], 'Limestone sphere': [sphere, 12, true],
@@ -1131,7 +1201,8 @@ export async function loadWorld(renderer, onProgress) {
   sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.35; sun.shadow.radius = 2.2;
   scene.add(sun, sun.target);
   let close = false, sunStrength = 3;
-  const low = new THREE.Color(0xffb878), high = new THREE.Color(0xfff0dc);
+  const HAZE_LOW = new THREE.Color(0xd8cdbf), HAZE_HIGH = new THREE.Color(0xbfcddb);
+  const low = new THREE.Color(0xffd0a6), high = new THREE.Color(0xfff0dc);
   const skyUniforms = sky.material.uniforms;
   const refresh = () => {
     const cam = sun.shadow.camera, half = close ? 84 : 560;
@@ -1151,9 +1222,10 @@ export async function loadWorld(renderer, onProgress) {
     skyUniforms.sunPosition.value.copy(SUN);
     const lift = smooth(0.1, 0.6, SUN.y);
     sun.color.lerpColors(low, high, lift);
-    sunStrength = 2.6 + 1.1 * lift;
+    sunStrength = (4.4 + 1.8 * lift) * OUTDOORS;
     sun.intensity = close ? 0 : sunStrength;     // inside, sunlight arrives only down the bores
     SKY_LEVEL.value = 0.5 + 0.5 * lift;
+    scene.fog.color.lerpColors(HAZE_LOW, HAZE_HIGH, lift).multiplyScalar(OUTDOORS);   // warm when the sun is low, the pale blue of the horizon at midday
     sun.position.copy(sun.target.position).addScaledVector(SUN, 1100);
   };
   // in the void only the shell and what stands inside it can matter, so nothing else is drawn or shadowed
@@ -1168,7 +1240,7 @@ export async function loadWorld(renderer, onProgress) {
   refresh();
 
   const visitors = makeVisitors(scene, figureSheet, figurePlaces, { bvh, slopes: new MeshBVH(mergeGeometries(slopes)), treads: new MeshBVH(mergeGeometries(treads)) },
-    { standOn, sun: { value: SUN }, sunLight: () => ({ strength: sunStrength, sky: SKY_LEVEL.value, color: sun.color }) });
+    { standOn, sun: { value: SUN }, sunLight: () => ({ strength: sunStrength, sky: SKY_LEVEL.value * OUTDOORS, color: sun.color }) });
   scene.add(...visitors.meshes);
 
   const shafts = makeSunshafts(holeBuf);

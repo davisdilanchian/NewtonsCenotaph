@@ -24,8 +24,8 @@ const floats = !!document.createElement('canvas').getContext('webgl2')?.getExten
 const renderer = new THREE.WebGLRenderer({ antialias: !floats, stencil: true, reversedDepthBuffer: true, powerPreference: 'high-performance', preserveDrawingBuffer: debug });
 
 renderer.setSize(innerWidth, innerHeight);
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.72;
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 0.75;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.shadowMap.autoUpdate = false;
@@ -486,7 +486,7 @@ async function start() {
   post.render(world.scene, camera);
   world.trees.castShadows(false);
   if (debug) window.walk = { THREE, player, keys, input, world, camera, teleport, renderer, fps: 0, PLACES, simulate, tick, look, gyro, sound, surface, step: () => stepTaken(performance.now()), steps,
-    hold: (on) => { hold = on; }, setDay: (u) => { dayClock = u; } };
+    hold: (on) => { hold = on; }, setDay: (u) => { dayClock = u; }, setFov: (v) => { FOV = v; camera.fov = v; camera.updateProjectionMatrix(); } };
   frame();
 
   world.loadDetail();

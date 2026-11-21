@@ -43,9 +43,11 @@ export function makePost(renderer) {
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
       float g = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
-      gl_FragColor.rgb = mix(vec3(g), gl_FragColor.rgb, 1.06);
+      gl_FragColor.rgb = mix(vec3(g), gl_FragColor.rgb, 0.94 * mix(0.35, 1.0, smoothstep(0.03, 0.3, g)));   // as on film, the deepest shade loses its colour
+      gl_FragColor.rgb = gl_FragColor.rgb * gl_FragColor.rgb / (gl_FragColor.rgb + 0.035) * 1.035;   // and a toe, so the dark vault reads black
+      gl_FragColor.rgb += mix(vec3(-0.012, 0.0, 0.016), vec3(0.022, 0.008, -0.022), smoothstep(0.2, 0.8, g)) * smoothstep(0.02, 0.18, g);   // a print's split: cool shade, warm light; black stays black
       float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy + fract(time) * vec2(37.0, 17.0), vec2(0.06711056, 0.00583715))));
-      gl_FragColor.rgb += (n - 0.5) / 160.0; }`,
+      gl_FragColor.rgb += (n - 0.5) * (1.0 / 160.0 + 0.022 * g * (1.0 - g)); }`,
     { scene: { value: target.texture }, spread: { value: levels[0].texture }, amount: { value: 0.07 }, time: { value: 0 } }, { toneMapped: true });
 
   const size = new THREE.Vector2();
