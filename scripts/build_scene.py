@@ -1145,14 +1145,16 @@ def lion_mesh(name="lion"):
     return out
 
 def inscription(c, M):
-    """Three lines in the core's face below the bridge, where the elevation shows them, wrapped
-    round the cylinder. His name stands as on his tomb in Westminster Abbey, ISAACVS NEWTON, and
-    the last words echo its epitaph."""
+    """Three lines in the core's face below the bridge, wrapped round the cylinder. His name stands as
+    on his tomb in Westminster Abbey, ISAACVS NEWTON, and the last words echo its epitaph. The block is
+    sized to the wall, its name a little over a tenth of the wall's height, and set a little above the
+    middle of the bare face between the arch and the shade of the cornice, as an inscription sits in a
+    classical frieze."""
     path = "/System/Library/Fonts/Supplemental/Times New Roman.ttf"
     font = bpy.data.fonts.load(path) if os.path.exists(path) else None
     r = D["core_R"]
     bm = bmesh.new()
-    for text, size, z in (("ISAACVS NEWTON", 2.3, 37.6), ("QVI NATVRAE LEGES PATEFECIT", 1.55, 35.1), ("HVMANI GENERIS DECVS", 1.55, 32.9)):
+    for text, size, z in (("ISAACVS NEWTON", 4.4, 30.6), ("QVI NATVRAE LEGES PATEFECIT", 2.6, 25.9), ("HVMANI GENERIS DECVS", 2.6, 22.3)):
         cu = bpy.data.curves.new("line", "FONT")
         cu.body = text; cu.size = size; cu.align_x = "CENTER"; cu.extrude = 0.025; cu.resolution_u = 4; cu.space_character = 1.14
         if font:

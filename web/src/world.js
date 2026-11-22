@@ -1353,7 +1353,7 @@ export async function loadWorld(renderer, onProgress) {
   const showVault = (on) => { for (const o of vaults) o.visible = on; figures.visible = on; dark.visible = !on; };
   const setQuality = (q) => {
     GRAIN.value = q.glow ? 10 : 7;
-    sky.clouds.setSize(...(q.glow ? [1536, 72, 96] : q.post ? [896, 56, 160] : [640, 44, 240]));
+    sky.clouds.setSize(...(q.glow ? [1536, 96, 320] : q.post ? [896, 64, 240] : [640, 48, 320]));   // a picture every five or so seconds: they drift slowly
     if (sun.shadow.mapSize.x !== q.shadow) { sun.shadow.mapSize.setScalar(q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
     water.visible = q.mirror > 0; stillWater.visible = !water.visible;
     if (q.mirror) water.getRenderTarget().setSize(q.mirror, q.mirror);

@@ -9,7 +9,7 @@ import * as THREE from 'three';
 
 const VERT = 'varying vec2 vUv; void main(){ vUv = position.xy * 0.5 + 0.5; gl_Position = vec4(position.xy, 0.0, 1.0); }';
 export const DOME = 2.04;                         // the dome is laid flat as a disc: uv = 0.5 + direction.xz / (1 + direction.y) / DOME
-const FRAG = (steps) => `uniform vec3 sun; uniform float time, coverage, seed; varying vec2 vUv;
+const FRAG = (steps) => `uniform vec3 sun; uniform float time, coverage; varying vec2 vUv;
   const float BASE = 1.5, THICK = 1.7;            // kilometres: the clouds' level bases, and the tallest of them
   float h1(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
   float n2(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -47,20 +47,14 @@ const FRAG = (steps) => `uniform vec3 sun; uniform float time, coverage, seed; v
     float r2 = dot(p, p), dy = (1.0 - r2) / (1.0 + r2), low = smoothstep(0.03, 0.13, dy);                 // the farthest of them are lost in the haze at the horizon
     if (low <= 0.0) { gl_FragColor = vec4(0.0); return; }
     vec3 d = vec3(p.x * (1.0 + dy), dy, p.y * (1.0 + dy));
-    // Long strides through the open air, and short ones wherever there is cloud: on meeting one the
-    // march goes back a stride and comes on again finely, so a cloud's face is found to within a short
-    // step. Where each pixel starts differs, which turns what steps remain into a grain the sky smooths.
-    float t0 = BASE / dy, far = t0 + THICK / dy, stride = THICK / dy / ${(steps / 3.2).toFixed(1)}, step = stride / 4.0;
-    float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy + seed * 5.588, vec2(0.06711056, 0.00583715))));
-    float t = t0 + stride * jitter, fineTo = -1.0, through = 1.0, lit = 0.0, sky = 0.0;
+    // Even steps through the layer, each pixel starting at its own fixed offset, so what grain remains
+    // is the same from one picture to the next and never sparkles as they are repainted.
+    float t0 = BASE / dy, step = THICK / dy / ${steps.toFixed(1)}, jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    float through = 1.0, lit = 0.0, sky = 0.0;
     for (int i = 0; i < ${steps}; i++) {
-      if (t >= far) break;
-      vec3 q = d * t;
+      vec3 q = d * (t0 + (float(i) + jitter) * step);
       float dn = form(q);
-      if (dn <= 0.0) { t += t < fineTo ? step : stride; continue; }
-      if (t >= fineTo) { fineTo = t + step; t = max(t0, t - stride + step * jitter); continue; }
-      fineTo = t + 2.5 * step;
-      t += step;
+      if (dn <= 0.0) continue;
       dn = billows(q, dn);
       if (dn <= 0.01) continue;
       float before = form(q + sun * 0.07) * 0.1 + form(q + sun * 0.2) * 0.16 + form(q + sun * 0.45) * 0.3;      // the cloud between here and the sun
@@ -80,11 +74,12 @@ const FRAG = (steps) => `uniform vec3 sun; uniform float time, coverage, seed; v
 export function makeClouds(renderer) {
   const tri = new THREE.BufferGeometry();
   tri.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
-  const uniforms = { sun: { value: new THREE.Vector3(0, 1, 0) }, time: { value: 0 }, coverage: { value: 0.3 }, seed: { value: 0 } };
+  const uniforms = { sun: { value: new THREE.Vector3(0, 1, 0) }, time: { value: 0 }, coverage: { value: 0.3 } };
   const quad = new THREE.Mesh(tri, null), stage = new THREE.Scene(), flat = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   quad.frustumCulled = false;
   stage.add(quad);
-  const picture = (size) => new THREE.WebGLRenderTarget(size, size, { depthBuffer: false, magFilter: THREE.LinearFilter, minFilter: THREE.LinearFilter, generateMipmaps: false });
+  // mipmapped, so the far clouds, squeezed toward the horizon, are averaged rather than picked at
+  const picture = (size) => new THREE.WebGLRenderTarget(size, size, { depthBuffer: false, magFilter: THREE.LinearFilter, minFilter: THREE.LinearMipmapLinearFilter, generateMipmaps: true, anisotropy: 4 });
   let size = 0, rows = 96, pictures = [], shown = [0, 0], next = 1, row = 0, baked = false;
   const taken = { sun: new THREE.Vector3(), time: 0 }, lit = new THREE.Vector3();   // the sun and the moment the picture being painted is of
   const paint = (to, from, count) => {
@@ -116,7 +111,7 @@ export function makeClouds(renderer) {
     /** A few rows more of the next picture, each frame. */
     update(sun, time) {
       if (!baked || lit.angleTo(sun) > 0.8) { clouds.whole(sun, time); return; }
-      if (row === 0) { taken.sun.copy(sun); taken.time = time; uniforms.seed.value = (uniforms.seed.value + 1) % 16; }
+      if (row === 0) { taken.sun.copy(sun); taken.time = time; }
       paint(pictures[next], row, 1);
       row++;
       clouds.fade.value = Math.min(1, row / rows);
@@ -128,6 +123,6 @@ export function makeClouds(renderer) {
       }
     },
   };
-  clouds.setSize(1536, 72, 96);
+  clouds.setSize(1536, 96, 320);
   return clouds;
 }

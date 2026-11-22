@@ -118,13 +118,19 @@ const flat = new THREE.Quaternion(-Math.SQRT1_2, 0, 0, Math.SQRT1_2), UP = new T
 // Each real step sets the pace from the time since the last one, and you keep walking at that pace
 // for as long as the steps keep coming. When they stop, you slow to a halt over half a second.
 const STRIDE = 1.1;                                  // model units a step carries you, about 3 m
-const steps = { last: -1e9, gap: 0.7, speed: 0 };
+// The on-screen stick and real steps never drive at once: while a thumb is on the stick, and for a
+// moment after it lets go, the stick alone moves you, and the shake of holding and pressing the phone
+// is not taken for footsteps.
+const steps = { last: -1e9, gap: 0.7, speed: 0, stickUntil: -1e9 };
+const onStick = (now) => now < steps.stickUntil;
 function stepTaken(now) {
+  if (onStick(now)) return;
   const since = (now - steps.last) / 1000;
   if (since < 1.6) steps.gap += (clamp(since, 0.35, 1.2) - steps.gap) * 0.5;
   steps.last = now; footfall = true;
 }
 function stepPace(dt) {
+  if (onStick(performance.now())) { steps.speed = 0; steps.last = -1e9; return 0; }
   const since = (performance.now() - steps.last) / 1000, going = since < steps.gap * 1.4 + 0.15;
   steps.speed += ((going ? STRIDE / steps.gap : 0) - steps.speed) * (1 - Math.exp(-dt * (going ? 4 : 3)));
   if (steps.speed < 0.02) steps.speed = 0;
@@ -422,6 +428,7 @@ function bindControls() {
     if (l > max) { x *= max / l; y *= max / l; }
     nub.style.transform = `translate(${x}px,${y}px)`;
     touchMove.x = x / max; touchMove.y = -y / max;
+    steps.stickUntil = Infinity;
   };
   stick.addEventListener('touchstart', (e) => { stickId = e.changedTouches[0].identifier; moveNub(e.changedTouches[0]); e.preventDefault(); }, { passive: false });
   canvas.addEventListener('touchstart', (e) => { const t = e.changedTouches[0]; lookId = t.identifier; lx = t.clientX; ly = t.clientY; }, { passive: true });
@@ -431,12 +438,13 @@ function bindControls() {
       if (t.identifier === lookId) { look((t.clientX - lx) * 2.2, (t.clientY - ly) * 2.2); lx = t.clientX; ly = t.clientY; }
     }
   }, { passive: true });
-  addEventListener('touchend', (e) => {
+  const lift = (e) => {                             // a touch let go, or taken away by the system
     for (const t of e.changedTouches) {
-      if (t.identifier === stickId) { stickId = null; touchMove.x = touchMove.y = 0; nub.style.transform = ''; }
+      if (t.identifier === stickId) { stickId = null; touchMove.x = touchMove.y = 0; nub.style.transform = ''; steps.stickUntil = performance.now() + 900; }
       if (t.identifier === lookId) lookId = null;
     }
-  });
+  };
+  addEventListener('touchend', lift); addEventListener('touchcancel', lift);
   $('jump').addEventListener('touchstart', (e) => { input.jump = true; e.preventDefault(); }, { passive: false });
 
   $('music').addEventListener('click', toggleMusic);
