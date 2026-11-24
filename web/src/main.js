@@ -12,11 +12,19 @@ if (touch) document.body.classList.add('touch');
 
 // three.js softens shadow edges by turning its samples a different way at every pixel, which prints a
 // fine hatch across every soft edge. Nine fixed, overlapping samples give the same softness, smooth.
+// Each sample is compared at the depth the surface itself has there, not the depth at the pixel: a wall
+// the sun only grazes slopes steeply away through the map, and judged flat it shadows itself in stripes.
 THREE.ShaderChunk.shadowmap_pars_fragment = THREE.ShaderChunk.shadowmap_pars_fragment.replace(
   /float phi = interleavedGradientNoise\( gl_FragCoord\.xy \) \* PI2;\s*shadow = \([\s\S]*?\) \* 0\.2;/,
-  `shadow = 0.0;
-   for ( int i = -1; i <= 1; i ++ ) for ( int j = -1; j <= 1; j ++ )
-     shadow += texture( shadowMap, vec3( shadowCoord.xy + vec2( float( i ), float( j ) ) * radius * 0.7, shadowCoord.z ) );
+  `vec3 sx = dFdx( shadowCoord.xyz ), sy = dFdy( shadowCoord.xyz );
+   float det = sx.x * sy.y - sx.y * sy.x;
+   vec2 slope = abs( det ) > 1e-14 ? vec2( sy.y * sx.z - sx.y * sy.z, sx.x * sy.z - sy.x * sx.z ) / det : vec2( 0.0 );
+   float lean = min( dot( abs( slope ), texelSize ), 0.002 );      // and a texel's worth of that slope toward the sun, since each texel holds one depth for its whole width
+   shadow = 0.0;
+   for ( int i = -1; i <= 1; i ++ ) for ( int j = -1; j <= 1; j ++ ) {
+     vec2 o = vec2( float( i ), float( j ) ) * radius * 0.7;
+     shadow += texture( shadowMap, vec3( shadowCoord.xy + o, shadowCoord.z + lean + clamp( dot( slope, o ), -0.002, 0.002 ) ) );
+   }
    shadow /= 9.0;`);
 
 // the scene is drawn to a floating-point image where the machine allows, and smoothed there; otherwise straight to the screen
